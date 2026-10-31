@@ -18,6 +18,7 @@ function fakeBridge(): TerminalBridge {
     spawn: vi.fn(async () => 1),
     write: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
+    close: vi.fn(async () => undefined),
     kill: vi.fn(async () => undefined),
     onOutput: () => () => undefined,
     onExit: () => () => undefined,

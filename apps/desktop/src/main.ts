@@ -3,13 +3,20 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { sidecarEnv } from "./sidecar-env";
 import { SidecarClient } from "./sidecar-client";
 import { resolveSidecarBinary } from "./sidecar-path";
 import { buildProcessSpec } from "./terminal-spec";
-import { forwardTerminalEvents, registerTerminalIpc } from "./terminal-ipc";
+import {
+  forwardTerminalEvents,
+  registerTerminalIpc,
+  type TerminalIpc,
+} from "./terminal-ipc";
 import { createMainWindowOptions } from "./window-options";
 
 let sidecar: SidecarClient | undefined;
+let terminals: TerminalIpc | undefined;
+let terminalsClosed = false;
 let mainWindow: BrowserWindow | undefined;
 
 function createWindow(): void {
@@ -36,7 +43,10 @@ function sendToRenderer(channel: string, payload: unknown): void {
 
 function startSidecar(): SidecarClient {
   const binary = resolveSidecarBinary(__dirname, process.platform);
-  const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
+  const child = spawn(binary, [], {
+    stdio: ["pipe", "pipe", "inherit"],
+    env: sidecarEnv(process.env),
+  });
   const client = new SidecarClient(child);
 
   client
@@ -56,7 +66,7 @@ app
     fs.mkdirSync(profileDir, { recursive: true });
 
     sidecar = startSidecar();
-    registerTerminalIpc(ipcMain, sidecar, (kind) =>
+    terminals = registerTerminalIpc(ipcMain, sidecar, (kind) =>
       buildProcessSpec(kind, {
         claudeProfileDir: profileDir,
         homeDir: os.homedir(),
@@ -71,8 +81,23 @@ app
     app.quit();
   });
 
-app.on("will-quit", () => {
-  sidecar?.stop();
+app.on("will-quit", (event) => {
+  if (!terminals || terminalsClosed) {
+    sidecar?.stop();
+    return;
+  }
+  // Os Claudes precisam de tempo para sair e gravar a configuração antes do sidecar cair.
+  event.preventDefault();
+  terminalsClosed = true;
+  terminals
+    .closeAll()
+    .catch((error: unknown) => {
+      console.error("Falha ao encerrar os terminais:", error);
+    })
+    .finally(() => {
+      sidecar?.stop();
+      app.quit();
+    });
 });
 
 app.on("window-all-closed", () => {
