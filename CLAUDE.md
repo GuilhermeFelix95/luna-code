@@ -33,5 +33,9 @@ Harness desktop com licença Apache-2.0, em monorepo pnpm. Casca em Electron; si
 - typescript-eslint 8.72 não suporta TypeScript 7. Manter TypeScript 6 até o suporte chegar.
 - pnpm 12 bloqueia scripts de build. O Electron só baixa o binário porque está aprovado em `allowBuilds` no `pnpm-workspace.yaml`. Não remover essa entrada.
 - Os tipos do Electron não declaram `app.exitCode`. Usar `process.exitCode`.
+- O ConPTY envia a consulta de cursor `ESC[6n` e espera a resposta do terminal antes de seguir. Quem renderiza (xterm.js) precisa responder; o teste do PTY responde por conta própria.
+- O ConPTY não fecha a saída quando o processo termina. Por isso `pty.exit` sai da thread de espera, com uma janela de 500 ms para a saída pendente.
+- O portable-pty 0.9.0 devolve erro no `kill` do Windows mesmo quando o `TerminateProcess` funciona (retorno invertido). O sidecar registra aviso no log e não falha a requisição.
+- Sessões encerradas ficam no mapa até `pty.kill`. O cliente deve chamar `pty.kill` depois de receber `pty.exit`.
 - O Electron procura o sidecar em `target/debug` (`apps/desktop/src/sidecar-path.ts`). Sem `cargo build` antes, o app inicia mas o ping falha.
 - Só atualizar a versão do Electron em PR própria, com versão estável de pelo menos duas semanas.
