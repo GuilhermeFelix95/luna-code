@@ -3,12 +3,22 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
-import { decodeBase64 } from "../src/terminal-api";
+import { decodeBase64, type TerminalKind } from "../src/terminal-api";
 
 const TERMINAL_FONT = "Consolas, 'Cascadia Mono', monospace";
 const TERMINAL_FONT_SIZE = 14;
 
-async function startTerminal(container: HTMLElement): Promise<void> {
+// Sessões com processo ainda ativo. São encerradas ao fechar a janela.
+const liveSessions = new Set<number>();
+
+async function openSession(
+  container: HTMLElement,
+  kind: TerminalKind,
+): Promise<void> {
+  const pane = document.createElement("div");
+  pane.className = "session";
+  container.appendChild(pane);
+
   const terminal = new Terminal({
     cursorBlink: true,
     fontFamily: TERMINAL_FONT,
@@ -16,15 +26,17 @@ async function startTerminal(container: HTMLElement): Promise<void> {
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
-  terminal.open(container);
+  terminal.open(pane);
   loadWebgl(terminal);
   fit.fit();
+  // Ajusta a sessão quando o painel muda de tamanho, pela janela ou por outra sessão.
+  new ResizeObserver(() => fit.fit()).observe(pane);
 
   // A saída pode chegar antes de o spawn resolver; guarda até conhecer o sessionId.
   const session: { id?: number; pendingOutput: string[] } = {
     pendingOutput: [],
   };
-  window.terminal.onOutput((payload) => {
+  const stopOutput = window.terminal.onOutput((payload) => {
     if (session.id === undefined) {
       session.pendingOutput.push(payload.data);
       return;
@@ -33,16 +45,30 @@ async function startTerminal(container: HTMLElement): Promise<void> {
       terminal.write(decodeBase64(payload.data));
     }
   });
-  window.terminal.onExit((payload) => {
+  const stopExit = window.terminal.onExit((payload) => {
     if (payload.sessionId !== session.id) {
       return;
     }
+    // Sem sessão ativa, não há mais saída para este painel; solta os listeners.
+    stopOutput();
+    stopExit();
+    liveSessions.delete(payload.sessionId);
     terminal.writeln(`\r\n[processo encerrado com código ${payload.code}]`);
     void window.terminal.kill(payload.sessionId);
   });
 
-  const id = await window.terminal.spawn("shell", terminal.cols, terminal.rows);
+  let id: number;
+  try {
+    id = await window.terminal.spawn(kind, terminal.cols, terminal.rows);
+  } catch (error: unknown) {
+    stopOutput();
+    stopExit();
+    console.error("Falha ao abrir sessão:", error);
+    pane.textContent = `Falha ao abrir sessão: ${String(error)}`;
+    return;
+  }
   session.id = id;
+  liveSessions.add(id);
   for (const data of session.pendingOutput.splice(0)) {
     terminal.write(decodeBase64(data));
   }
@@ -52,10 +78,6 @@ async function startTerminal(container: HTMLElement): Promise<void> {
   });
   terminal.onResize(({ cols, rows }) => {
     void window.terminal.resize(id, cols, rows);
-  });
-  window.addEventListener("resize", () => fit.fit());
-  window.addEventListener("beforeunload", () => {
-    void window.terminal.kill(id);
   });
 }
 
@@ -70,12 +92,30 @@ function loadWebgl(terminal: Terminal): void {
   }
 }
 
+function bindNewSessionButton(
+  buttonId: string,
+  kind: TerminalKind,
+  container: HTMLElement,
+): void {
+  const button = document.getElementById(buttonId);
+  if (!button) {
+    throw new Error(`botão #${buttonId} não encontrado na janela`);
+  }
+  button.addEventListener("click", () => {
+    void openSession(container, kind);
+  });
+}
+
 const container = document.getElementById("terminal");
 if (!container) {
   throw new Error("elemento #terminal não encontrado na janela");
 }
 
-startTerminal(container).catch((error: unknown) => {
-  console.error("Falha ao iniciar o terminal:", error);
-  container.textContent = `Falha ao iniciar o terminal: ${String(error)}`;
+bindNewSessionButton("new-shell", "shell", container);
+bindNewSessionButton("new-claude", "claude", container);
+window.addEventListener("beforeunload", () => {
+  for (const id of liveSessions) {
+    void window.terminal.kill(id);
+  }
 });
+void openSession(container, "shell");
