@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["vite/client"]
+  },
+  "include": ["./", "../src/terminal-api.ts"]
+}
