@@ -13,15 +13,21 @@ const TERMINAL_FONT_SIZE = 14;
 // Sessões com processo ainda ativo. São encerradas ao fechar a janela.
 const liveSessions = new Set<number>();
 
+export interface Session {
+  focus(): void;
+  close(): void;
+}
+
+/**
+ * Abre um terminal dentro de `pane`. `onExit` é chamado quando o processo termina.
+ * Se o spawn falhar, a exceção sobe para quem chamou e nada fica registrado.
+ */
 export async function openSession(
-  container: HTMLElement,
+  pane: HTMLElement,
   kind: TerminalKind,
   bridge: TerminalBridge,
-): Promise<void> {
-  const pane = document.createElement("div");
-  pane.className = "session";
-  container.appendChild(pane);
-
+  onExit: (code: number | null) => void,
+): Promise<Session> {
   const terminal = new Terminal({
     cursorBlink: true,
     fontFamily: TERMINAL_FONT,
@@ -32,11 +38,13 @@ export async function openSession(
   terminal.open(pane);
   loadWebgl(terminal);
   fit.fit();
-  // Ajusta a sessão quando o painel muda de tamanho, pela janela ou por outra sessão.
-  new ResizeObserver(() => fit.fit()).observe(pane);
+  // Ajusta a sessão quando o painel muda de tamanho, inclusive ao ser exibido de novo.
+  const resizeObserver = new ResizeObserver(() => fit.fit());
+  resizeObserver.observe(pane);
 
   // A saída pode chegar antes de o spawn resolver; guarda até conhecer o sessionId.
-  const session: { id?: number; pendingOutput: string[] } = {
+  const session: { id?: number; ended: boolean; pendingOutput: string[] } = {
+    ended: false,
     pendingOutput: [],
   };
   const stopOutput = bridge.onOutput((payload) => {
@@ -52,12 +60,14 @@ export async function openSession(
     if (payload.sessionId !== session.id) {
       return;
     }
-    // Sem sessão ativa, não há mais saída para este painel; solta os listeners.
+    // Sem processo ativo, não há mais saída para este painel; solta os listeners.
+    session.ended = true;
     stopOutput();
     stopExit();
     liveSessions.delete(payload.sessionId);
     terminal.writeln(`\r\n[processo encerrado com código ${payload.code}]`);
     void bridge.kill(payload.sessionId);
+    onExit(payload.code);
   });
 
   let id: number;
@@ -66,9 +76,9 @@ export async function openSession(
   } catch (error: unknown) {
     stopOutput();
     stopExit();
-    console.error("Falha ao abrir sessão:", error);
-    pane.textContent = `Falha ao abrir sessão: ${String(error)}`;
-    return;
+    resizeObserver.disconnect();
+    terminal.dispose();
+    throw error;
   }
   session.id = id;
   liveSessions.add(id);
@@ -82,8 +92,21 @@ export async function openSession(
   terminal.onResize(({ cols, rows }) => {
     void bridge.resize(id, cols, rows);
   });
-  // Sem foco, o teclado continua no botão que abriu a sessão.
   terminal.focus();
+
+  return {
+    focus: () => terminal.focus(),
+    close: () => {
+      resizeObserver.disconnect();
+      stopOutput();
+      stopExit();
+      if (!session.ended) {
+        liveSessions.delete(id);
+        void bridge.kill(id);
+      }
+      terminal.dispose();
+    },
+  };
 }
 
 export function killLiveSessions(bridge: TerminalBridge): void {
