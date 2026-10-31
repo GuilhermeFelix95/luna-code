@@ -266,6 +266,27 @@ describe("ChatView: adicionar projeto", () => {
     );
   });
 
+  it("pasta que já é projeto não é adicionada de novo e fica destacada", async () => {
+    const { view, elements, state, confirm } = setup({ projects: [PROJECT] });
+    state.pickProject.mockResolvedValueOnce({
+      path: PROJECT.path,
+      personal: false,
+    });
+    await view.load();
+
+    elements.addProject.click();
+    await settle();
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(state.addProject).not.toHaveBeenCalled();
+    expect(elements.list.textContent).toContain("Esta pasta já é um projeto.");
+    expect(
+      elements.list
+        .querySelector(".project-group")!
+        .classList.contains("is-highlighted"),
+    ).toBe(true);
+  });
+
   it("recusado na confirmação, não adiciona", async () => {
     const { view, elements, state } = setup({ confirmAnswer: false });
     state.pickProject.mockResolvedValueOnce({

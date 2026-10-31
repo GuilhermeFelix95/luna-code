@@ -82,6 +82,10 @@ body {
   margin-bottom: 8px;
 }
 
+.project-group.is-highlighted .project-toggle {
+  color: var(--accent);
+}
+
 .project-header {
   display: flex;
   align-items: center;

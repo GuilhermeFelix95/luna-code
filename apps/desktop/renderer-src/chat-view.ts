@@ -65,6 +65,8 @@ export class ChatView {
   private current: Conversation | undefined;
   /** Projetos recolhidos na barra lateral. */
   private readonly collapsed = new Set<string>();
+  /** Projeto destacado na barra lateral, quando uma adição repetida aponta para ele. */
+  private highlightedProjectId: string | undefined;
   /** Última escolha de modo, modelo, esforço e planejar. Conversas novas começam com ela. */
   private lastSettings: ChatSettings = { mode: "readonly" };
   private models: ChatModel[] = [];
@@ -196,6 +198,17 @@ export class ChatView {
       if (!picked) {
         return;
       }
+      const existing = this.projects.find(
+        (project) => project.path === picked.path,
+      );
+      if (existing) {
+        // Pasta repetida: não cria duplicata. Mostra o motivo e destaca o projeto já existente.
+        this.collapsed.delete(existing.id);
+        this.highlightedProjectId = existing.id;
+        this.notice = "Esta pasta já é um projeto.";
+        this.renderList();
+        return;
+      }
       const name = basename(picked.path);
       const warning = picked.personal
         ? " Esta é a sua pasta pessoal: o Claude pode ler e alterar tudo nela."
@@ -210,6 +223,7 @@ export class ChatView {
       const project = await this.state.addProject(picked.path);
       this.projects = [...this.projects, project];
       this.notice = "";
+      this.highlightedProjectId = undefined;
       this.renderList();
     } catch (error: unknown) {
       this.fail("Não foi possível adicionar o projeto", error);
@@ -514,6 +528,10 @@ export class ChatView {
   private renderProject(project: Project): HTMLElement {
     const group = document.createElement("section");
     group.className = "project-group";
+    group.classList.toggle(
+      "is-highlighted",
+      project.id === this.highlightedProjectId,
+    );
 
     const expanded = !this.collapsed.has(project.id);
     const header = document.createElement("div");
