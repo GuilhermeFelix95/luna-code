@@ -11,6 +11,7 @@ Harness desktop com licença Apache-2.0, em monorepo pnpm. Casca em Electron; si
 - Vitest 5.0.5
 - ESLint 10.13.0 com typescript-eslint 8.72.1
 - Prettier 3.9.10
+- Rust 1.99.1 (fixado em `rust-toolchain.toml`), crate `luna-sidecar` em `crates/sidecar`
 
 ## Comandos
 
@@ -22,10 +23,15 @@ Harness desktop com licença Apache-2.0, em monorepo pnpm. Casca em Electron; si
 - Tipos: `pnpm --filter @luna-code/desktop exec tsc -p tsconfig.json --noEmit`
 - Build: `pnpm --filter @luna-code/desktop run build`
 - Abrir a aplicação: `pnpm --filter @luna-code/desktop start`
+- Build do sidecar (obrigatório antes de `start`): `cargo build -p luna-sidecar`
+- Testes do sidecar: `cargo test -p luna-sidecar`
+- Clippy do sidecar: `cargo clippy -p luna-sidecar --all-targets -- -D warnings`
+- Formatação do sidecar: `cargo fmt -p luna-sidecar -- --check`
 
 ## Armadilhas conhecidas
 
 - typescript-eslint 8.72 não suporta TypeScript 7. Manter TypeScript 6 até o suporte chegar.
 - pnpm 12 bloqueia scripts de build. O Electron só baixa o binário porque está aprovado em `allowBuilds` no `pnpm-workspace.yaml`. Não remover essa entrada.
 - Os tipos do Electron não declaram `app.exitCode`. Usar `process.exitCode`.
+- O Electron procura o sidecar em `target/debug` (`apps/desktop/src/sidecar-path.ts`). Sem `cargo build` antes, o app inicia mas o ping falha.
 - Só atualizar a versão do Electron em PR própria, com versão estável de pelo menos duas semanas.
