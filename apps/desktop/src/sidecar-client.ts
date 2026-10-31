@@ -17,6 +17,14 @@ export interface SidecarProcess {
 
 export type SidecarEventListener = (event: SidecarEvent) => void;
 
+/** Programa de uma sessão. Sem `program`, o sidecar abre o shell padrão. */
+export interface ProcessSpec {
+  program?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
 interface PendingRequest {
   resolve(result: unknown): void;
   reject(error: Error): void;
@@ -45,8 +53,12 @@ export class SidecarClient {
     return result;
   }
 
-  async spawnTerminal(cols: number, rows: number): Promise<number> {
-    const result = await this.call("pty.spawn", { cols, rows });
+  async spawnTerminal(
+    cols: number,
+    rows: number,
+    spec: ProcessSpec = {},
+  ): Promise<number> {
+    const result = await this.call("pty.spawn", { cols, rows, ...spec });
     if (!isSessionResult(result)) {
       throw new Error("resultado de pty.spawn inválido");
     }

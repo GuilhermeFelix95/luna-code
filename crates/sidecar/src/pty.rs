@@ -17,7 +17,7 @@ const EXIT_OUTPUT_GRACE: Duration = Duration::from_millis(500);
 const EVENT_OUTPUT: &str = "pty.output";
 const EVENT_EXIT: &str = "pty.exit";
 
-/// Shell padrão da plataforma. O cliente não escolhe o programa, só o tamanho.
+/// Shell padrão da plataforma, usado quando a requisição não informa `program`.
 pub fn default_shell() -> CommandBuilder {
     if cfg!(windows) {
         CommandBuilder::new("powershell.exe")
