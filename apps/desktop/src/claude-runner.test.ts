@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RunnerEvent } from "./chat-api";
 import {
   buildOptions,
+  listClaudeModels,
   runClaudeTurn,
   toRunnerEvents,
   type QueryFn,
@@ -214,6 +215,66 @@ describe("toRunnerEvents", () => {
     expect(
       toRunnerEvents(message({ type: "system", subtype: "status" })),
     ).toEqual([]);
+  });
+});
+
+describe("buildOptions com modelo e esforço", () => {
+  it("não envia modelo nem esforço quando o usuário deixou o padrão", () => {
+    const options = buildOptions(turnInput());
+
+    expect(options).not.toHaveProperty("model");
+    expect(options).not.toHaveProperty("effort");
+  });
+
+  it("envia modelo e esforço escolhidos", () => {
+    const options = buildOptions(turnInput({ model: "opus", effort: "high" }));
+
+    expect(options.model).toBe("opus");
+    expect(options.effort).toBe("high");
+  });
+});
+
+describe("listClaudeModels", () => {
+  it("converte a lista do SDK e descarta níveis de esforço desconhecidos", async () => {
+    const close = vi.fn();
+    const queryFn = (() => ({
+      supportedModels: async () => [
+        {
+          value: "opus",
+          displayName: "Opus 5.5",
+          supportedEffortLevels: ["low", "turbo", "max"],
+        },
+        { value: "haiku", displayName: "Haiku 5.5" },
+      ],
+      close,
+    })) as unknown as QueryFn;
+
+    const models = await listClaudeModels(queryFn, { cwd, configDir });
+
+    expect(models).toEqual([
+      {
+        value: "opus",
+        displayName: "Opus 5.5",
+        supportedEffortLevels: ["low", "max"],
+      },
+      { value: "haiku", displayName: "Haiku 5.5", supportedEffortLevels: [] },
+    ]);
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("fecha a consulta mesmo quando a listagem falha", async () => {
+    const close = vi.fn();
+    const queryFn = (() => ({
+      supportedModels: async () => {
+        throw new Error("sem login");
+      },
+      close,
+    })) as unknown as QueryFn;
+
+    await expect(listClaudeModels(queryFn, { cwd, configDir })).rejects.toThrow(
+      "sem login",
+    );
+    expect(close).toHaveBeenCalled();
   });
 });
 

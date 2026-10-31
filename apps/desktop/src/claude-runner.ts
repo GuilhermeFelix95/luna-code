@@ -6,19 +6,29 @@ import type {
   Options,
   Query,
   SDKMessage,
+  SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { RunnerEvent } from "./chat-api";
+import {
+  isEffortLevel,
+  type ChatMode,
+  type ChatModel,
+  type EffortLevel,
+  type RunnerEvent,
+} from "./chat-api";
 import { sidecarEnv } from "./sidecar-env";
 
-/** Modos de permissão expostos ao usuário. Os nomes do SDK ficam dentro deste módulo. */
-export const CHAT_MODES = ["readonly", "ask", "full"] as const;
-export type ChatMode = (typeof CHAT_MODES)[number];
-
-export type QueryFn = (params: { prompt: string; options: Options }) => Query;
+export type QueryFn = (params: {
+  prompt: string | AsyncIterable<SDKUserMessage>;
+  options: Options;
+}) => Query;
 
 export interface TurnInput {
   prompt: string;
   mode: ChatMode;
+  /** Alias do modelo (ex.: "opus"). Ausente usa o padrão do modelo. */
+  model?: string;
+  /** Ausente usa o padrão do modelo. */
+  effort?: EffortLevel;
   /** Sessão anterior do Claude, para continuar a mesma conversa. */
   sessionId?: string;
   /** Pasta de trabalho do app (fora da pasta pessoal, como no terminal). */
@@ -50,18 +60,61 @@ const MODE_OPTIONS: Record<
   }),
 };
 
+/** Opções de perfil comuns a turnos e à consulta de modelos: pasta, login e ambiente limpo. */
+export function profileOptions(
+  cwd: string,
+  configDir: string,
+  parentEnv: NodeJS.ProcessEnv = process.env,
+): Options {
+  return {
+    cwd,
+    env: { ...sidecarEnv(parentEnv), CLAUDE_CONFIG_DIR: configDir },
+  };
+}
+
 export function buildOptions(
   input: TurnInput,
   parentEnv: NodeJS.ProcessEnv = process.env,
 ): Options {
   return {
-    cwd: input.cwd,
-    env: { ...sidecarEnv(parentEnv), CLAUDE_CONFIG_DIR: input.configDir },
+    ...profileOptions(input.cwd, input.configDir, parentEnv),
     resume: input.sessionId,
     includePartialMessages: true,
     abortController: input.abortController,
+    // Só entram quando definidos: o SDK usa o padrão do modelo se não receber nada.
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
     ...MODE_OPTIONS[input.mode](input.canUseTool),
   };
+}
+
+/** Entrada que nunca envia mensagem. Mantém a consulta aberta até ela ser fechada. */
+async function* idlePrompt(): AsyncGenerator<never> {
+  await new Promise<void>(() => undefined);
+  yield* [];
+}
+
+/** Lista os modelos da conta, com os níveis de esforço que cada um aceita. */
+export async function listClaudeModels(
+  queryFn: QueryFn,
+  profile: { cwd: string; configDir: string },
+): Promise<ChatModel[]> {
+  const run = queryFn({
+    prompt: idlePrompt(),
+    options: profileOptions(profile.cwd, profile.configDir),
+  });
+  try {
+    const models = await run.supportedModels();
+    return models.map((model) => ({
+      value: model.value,
+      displayName: model.displayName,
+      supportedEffortLevels: (model.supportedEffortLevels ?? []).filter(
+        isEffortLevel,
+      ),
+    }));
+  } finally {
+    run.close();
+  }
 }
 
 /** Converte uma mensagem do SDK em zero ou mais eventos. Mensagens de subagentes são ignoradas. */

@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { registerChatIpc } from "./chat-ipc";
-import { runClaudeTurn } from "./claude-runner";
+import { listClaudeModels, runClaudeTurn } from "./claude-runner";
 import { sidecarEnv } from "./sidecar-env";
 import { SidecarClient } from "./sidecar-client";
 import { resolveSidecarBinary } from "./sidecar-path";
@@ -78,25 +78,25 @@ app
       }),
     );
     forwardTerminalEvents(sidecar, sendToRenderer);
-    // Etapa 2: só leitura. Sem pergunta ao usuário, qualquer chamada que precise de aprovação é negada.
     registerChatIpc(
       ipcMain,
       (request) =>
         runClaudeTurn(
           {
             prompt: request.prompt,
-            mode: "readonly",
+            mode: request.settings.mode,
+            model: request.settings.model,
+            effort: request.settings.effort,
             sessionId: request.sessionId,
             cwd: workspaceDir,
             configDir: profileDir,
-            canUseTool: async () => ({
-              behavior: "deny",
-              message: "Aprovação de ferramentas ainda não está disponível.",
-            }),
+            canUseTool: request.canUseTool,
             abortController: request.abortController,
           },
           query,
         ),
+      () =>
+        listClaudeModels(query, { cwd: workspaceDir, configDir: profileDir }),
       sendToRenderer,
     );
     createWindow();
