@@ -101,6 +101,27 @@ describe("SidecarClient de terminal", () => {
     await expect(sessionId).resolves.toBe(7);
   });
 
+  it("spawnTerminal repassa programa, argumentos, cwd e ambiente", async () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+    const spec = {
+      program: "claude",
+      args: ["--help"],
+      cwd: "C:\\Users\\guilh",
+      env: { CLAUDE_CONFIG_DIR: "C:\\perfil" },
+    };
+
+    const requestPromise = fake.readRequest();
+    const sessionId = client.spawnTerminal(80, 24, spec);
+    const request = await requestPromise;
+    expect(request.params).toEqual({ cols: 80, rows: 24, ...spec });
+    fake.reply(
+      JSON.stringify({ id: request.id, result: { sessionId: 3 }, error: null }),
+    );
+
+    await expect(sessionId).resolves.toBe(3);
+  });
+
   it("spawnTerminal rejeita resultado sem sessionId numérico", async () => {
     const fake = new FakeSidecar();
     const client = new SidecarClient(fake);

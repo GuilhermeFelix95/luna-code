@@ -3,10 +3,12 @@
 
 mod pty;
 
+use std::collections::BTreeMap;
 use std::sync::mpsc::Sender;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use portable_pty::CommandBuilder;
 use pty::PtySessions;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -36,11 +38,21 @@ struct Response {
     error: Option<String>,
 }
 
+/// Sem `program`, o processo é o shell padrão. Quem chama é o processo principal,
+/// que monta estes campos a partir de um tipo fixo; o renderer não envia comando.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SpawnParams {
     cols: u16,
     rows: u16,
+    #[serde(default)]
+    program: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -110,9 +122,9 @@ impl Sidecar {
             METHOD_PTY_SPAWN => {
                 let params: SpawnParams = parse_params(params)?;
                 check_size(params.cols, params.rows)?;
-                let id = self
-                    .sessions
-                    .spawn(pty::default_shell(), params.cols, params.rows)?;
+                let (cols, rows) = (params.cols, params.rows);
+                let command = build_command(params)?;
+                let id = self.sessions.spawn(command, cols, rows)?;
                 Ok(json!({ "sessionId": id }))
             }
             METHOD_PTY_WRITE => {
@@ -149,6 +161,42 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Stri
     serde_json::from_value(params).map_err(|error| format!("parâmetros inválidos: {error}"))
 }
 
+fn build_command(params: SpawnParams) -> Result<CommandBuilder, String> {
+    let mut command = match params.program {
+        Some(program) => {
+            if program.is_empty() {
+                return Err("programa não pode ser vazio".to_string());
+            }
+            check_no_nul("programa", &program)?;
+            CommandBuilder::new(program)
+        }
+        None => pty::default_shell(),
+    };
+    for arg in &params.args {
+        check_no_nul("argumento", arg)?;
+        command.arg(arg);
+    }
+    if let Some(cwd) = &params.cwd {
+        check_no_nul("diretório", cwd)?;
+        command.cwd(cwd);
+    }
+    for (name, value) in &params.env {
+        if name.is_empty() || name.contains('=') || name.contains('\0') {
+            return Err(format!("nome de variável de ambiente inválido: {name}"));
+        }
+        check_no_nul("valor de variável de ambiente", value)?;
+        command.env(name, value);
+    }
+    Ok(command)
+}
+
+fn check_no_nul(label: &str, text: &str) -> Result<(), String> {
+    if text.contains('\0') {
+        return Err(format!("{label} não pode conter byte nulo"));
+    }
+    Ok(())
+}
+
 fn check_size(cols: u16, rows: u16) -> Result<(), String> {
     if cols == 0 || cols > MAX_COLS || rows == 0 || rows > MAX_ROWS {
         return Err(format!(
@@ -169,8 +217,11 @@ fn error_response(id: Option<u64>, message: String) -> Response {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use super::Sidecar;
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use serde_json::{Value, json};
 
     fn sidecar() -> Sidecar {
@@ -231,6 +282,78 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .starts_with("tamanho inválido")
+        );
+    }
+
+    #[test]
+    fn spawn_passa_programa_argumentos_e_ambiente_ao_processo() {
+        let (tx, rx) = mpsc::channel();
+        let mut sidecar = Sidecar::new(tx);
+        let (program, args) = if cfg!(windows) {
+            ("cmd.exe", json!(["/C", "echo", "%LUNA_TESTE%"]))
+        } else {
+            ("/bin/sh", json!(["-c", "echo $LUNA_TESTE"]))
+        };
+        let spawn = json!({"id": 1, "method": "pty.spawn", "params": {
+            "cols": 80,
+            "rows": 24,
+            "program": program,
+            "args": args,
+            "env": {"LUNA_TESTE": "valor-do-teste"},
+        }});
+
+        let response = parse(&mut sidecar, &spawn.to_string());
+        assert!(response["error"].is_null(), "spawn falhou: {response}");
+        let id = response["result"]["sessionId"].clone();
+
+        let mut output = String::new();
+        let mut answered_cursor_query = false;
+        while !output.contains("valor-do-teste") {
+            let event: Value = serde_json::from_str(
+                &rx.recv_timeout(Duration::from_secs(10))
+                    .expect("saída do processo esperada"),
+            )
+            .expect("evento é JSON");
+            if event["event"] != "pty.output" {
+                continue;
+            }
+            let bytes = STANDARD
+                .decode(event["data"].as_str().expect("data é string"))
+                .expect("data é base64");
+            output.push_str(&String::from_utf8_lossy(&bytes));
+            // Mesmo papel do xterm.js: responde à consulta de cursor do ConPTY.
+            if !answered_cursor_query && output.contains("\u{1b}[6n") {
+                let reply = STANDARD.encode(b"\x1b[1;1R");
+                let write = json!({"id": 2, "method": "pty.write", "params": {
+                    "sessionId": id,
+                    "data": reply,
+                }});
+                parse(&mut sidecar, &write.to_string());
+                answered_cursor_query = true;
+            }
+        }
+    }
+
+    #[test]
+    fn spawn_rejeita_programa_vazio_sem_criar_processo() {
+        let response = parse(
+            &mut sidecar(),
+            r#"{"id":5,"method":"pty.spawn","params":{"cols":80,"rows":24,"program":""}}"#,
+        );
+
+        assert_eq!(response["error"], json!("programa não pode ser vazio"));
+    }
+
+    #[test]
+    fn spawn_rejeita_chave_de_ambiente_com_igual() {
+        let response = parse(
+            &mut sidecar(),
+            r#"{"id":6,"method":"pty.spawn","params":{"cols":80,"rows":24,"env":{"A=B":"x"}}}"#,
+        );
+
+        assert_eq!(
+            response["error"],
+            json!("nome de variável de ambiente inválido: A=B")
         );
     }
 
