@@ -249,6 +249,22 @@ describe("ChatView: adicionar projeto", () => {
     expect(elements.list.textContent).toContain("novo");
   });
 
+  it("depois de adicionar, abre uma conversa nova no projeto", async () => {
+    const { view, elements, state } = setup({});
+    state.pickProject.mockResolvedValueOnce({
+      path: "C:\\dev\\app",
+      personal: false,
+    });
+    await view.load();
+
+    elements.addProject.click();
+    await settle();
+
+    expect(state.createConversation).toHaveBeenCalledWith("p2");
+    expect(elements.host.hidden).toBe(false);
+    expect(elements.welcome.hidden).toBe(true);
+  });
+
   it("pasta pessoal: o aviso aparece na confirmação", async () => {
     const { view, elements, state, confirm } = setup({});
     state.pickProject.mockResolvedValueOnce({

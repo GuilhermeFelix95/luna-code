@@ -225,6 +225,9 @@ export class ChatView {
       this.notice = "";
       this.highlightedProjectId = undefined;
       this.renderList();
+      // Projeto novo já abre uma conversa, para o usuário começar sem outro clique.
+      // newConversation trata as próprias falhas, então não cai no catch abaixo.
+      await this.newConversation(project.id);
     } catch (error: unknown) {
       this.fail("Não foi possível adicionar o projeto", error);
     }
