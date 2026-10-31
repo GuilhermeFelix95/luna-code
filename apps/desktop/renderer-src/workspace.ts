@@ -18,6 +18,8 @@ interface Tab {
 export interface WorkspaceView {
   host: HTMLElement;
   list: HTMLUListElement;
+  /** Chamado quando um terminal vira o ativo, para a janela mostrar a área dele. */
+  onActivate: () => void;
 }
 
 /** Uma sessão visível por vez; as demais continuam vivas, só escondidas. */
@@ -65,6 +67,7 @@ export class Workspace {
     this.active = tab;
     tab.pane.hidden = false;
     tab.item.setAttribute("aria-current", "true");
+    this.view.onActivate();
     tab.session?.focus();
   }
 

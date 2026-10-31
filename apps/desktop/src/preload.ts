@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import {
+  CHAT_CHANNELS,
+  type ChatBridge,
+  type ChatEventPayload,
+} from "./chat-api";
+import {
   TERMINAL_CHANNELS,
   type TerminalBridge,
   type TerminalExitPayload,
@@ -34,4 +39,14 @@ const terminal: TerminalBridge = {
     subscribe<TerminalExitPayload>(TERMINAL_CHANNELS.exit, listener),
 };
 
+const chat: ChatBridge = {
+  send: (conversationId, text) =>
+    ipcRenderer.invoke(CHAT_CHANNELS.send, conversationId, text),
+  stop: (conversationId) =>
+    ipcRenderer.invoke(CHAT_CHANNELS.stop, conversationId),
+  onEvent: (listener) =>
+    subscribe<ChatEventPayload>(CHAT_CHANNELS.event, listener),
+};
+
 contextBridge.exposeInMainWorld("terminal", terminal);
+contextBridge.exposeInMainWorld("chat", chat);

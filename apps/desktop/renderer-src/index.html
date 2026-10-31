@@ -6,15 +6,19 @@
     <title>Luna Code</title>
   </head>
   <body>
-    <header id="toolbar">
-      <button type="button" id="new-shell">Novo terminal</button>
-      <button type="button" id="new-claude">Claude Code</button>
-    </header>
     <div id="layout">
-      <nav id="sidebar" aria-label="Sessões">
+      <nav id="sidebar" aria-label="Navegação">
+        <button type="button" id="new-chat" class="sidebar-action">
+          Nova conversa
+        </button>
+        <ul id="chat-list"></ul>
+        <button type="button" id="new-shell" class="sidebar-action">
+          Novo terminal
+        </button>
         <ul id="session-list"></ul>
       </nav>
-      <main id="terminal"></main>
+      <main id="chat"></main>
+      <main id="terminal" hidden></main>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

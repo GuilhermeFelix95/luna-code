@@ -1,6 +1,6 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
-import type { TerminalKind } from "../src/terminal-api";
+import { ChatView } from "./chat-view";
 import { Workspace } from "./workspace";
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -11,20 +11,44 @@ function requireElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+// A área principal mostra o chat ou um terminal, nunca os dois.
+const chatHost = requireElement("chat");
+const terminalHost = requireElement("terminal");
+
+function showChat(): void {
+  chatHost.hidden = false;
+  terminalHost.hidden = true;
+}
+
+function showTerminal(): void {
+  terminalHost.hidden = false;
+  chatHost.hidden = true;
+}
+
+const chat = new ChatView(
+  {
+    host: chatHost,
+    list: requireElement<HTMLUListElement>("chat-list"),
+  },
+  window.chat,
+  showChat,
+);
+
 const workspace = new Workspace(
   {
-    host: requireElement("terminal"),
+    host: terminalHost,
     list: requireElement<HTMLUListElement>("session-list"),
+    onActivate: showTerminal,
   },
   window.terminal,
 );
 
-function bindNewSessionButton(buttonId: string, kind: TerminalKind): void {
-  requireElement(buttonId).addEventListener("click", () => {
-    void workspace.open(kind);
-  });
-}
+requireElement("new-chat").addEventListener("click", () => {
+  chat.newConversation();
+});
 
-bindNewSessionButton("new-shell", "shell");
-bindNewSessionButton("new-claude", "claude");
-void workspace.open("shell");
+requireElement("new-shell").addEventListener("click", () => {
+  void workspace.open("shell");
+});
+
+chat.newConversation();
