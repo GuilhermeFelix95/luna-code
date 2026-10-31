@@ -4,7 +4,9 @@ export const WINDOW_WIDTH = 1280;
 export const WINDOW_HEIGHT = 800;
 
 // Isolamento de contexto e sandbox ativos: o renderer não acessa Node diretamente.
-export function createMainWindowOptions(): BrowserWindowConstructorOptions {
+export function createMainWindowOptions(
+  preloadPath: string,
+): BrowserWindowConstructorOptions {
   return {
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
@@ -12,6 +14,7 @@ export function createMainWindowOptions(): BrowserWindowConstructorOptions {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      preload: preloadPath,
     },
   };
 }
