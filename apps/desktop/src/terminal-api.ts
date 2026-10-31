@@ -10,6 +10,13 @@ export const TERMINAL_CHANNELS = {
   exit: "terminal:exit",
 } as const;
 
+/**
+ * Tipos de sessão que o renderer pode pedir. O processo principal traduz cada um em
+ * programa e ambiente; o renderer nunca envia um comando.
+ */
+export const TERMINAL_KINDS = ["shell", "claude"] as const;
+export type TerminalKind = (typeof TERMINAL_KINDS)[number];
+
 export interface TerminalOutputPayload {
   sessionId: number;
   /** Bytes da saída em base64, como vêm do sidecar. */
@@ -23,7 +30,7 @@ export interface TerminalExitPayload {
 
 /** API exposta ao renderer pelo preload. Nada além disso atravessa a fronteira. */
 export interface TerminalBridge {
-  spawn(cols: number, rows: number): Promise<number>;
+  spawn(kind: TerminalKind, cols: number, rows: number): Promise<number>;
   write(sessionId: number, data: string): Promise<void>;
   resize(sessionId: number, cols: number, rows: number): Promise<void>;
   kill(sessionId: number): Promise<void>;

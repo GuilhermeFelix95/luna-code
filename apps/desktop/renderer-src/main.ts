@@ -41,7 +41,7 @@ async function startTerminal(container: HTMLElement): Promise<void> {
     void window.terminal.kill(payload.sessionId);
   });
 
-  const id = await window.terminal.spawn(terminal.cols, terminal.rows);
+  const id = await window.terminal.spawn("shell", terminal.cols, terminal.rows);
   session.id = id;
   for (const data of session.pendingOutput.splice(0)) {
     terminal.write(decodeBase64(data));

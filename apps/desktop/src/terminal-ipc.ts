@@ -1,15 +1,22 @@
 import type { IpcMain } from "electron";
+import type { ProcessSpec } from "./sidecar-client";
+import type { SidecarEvent } from "./sidecar-protocol";
 import {
   TERMINAL_CHANNELS,
   type TerminalExitPayload,
+  type TerminalKind,
   type TerminalOutputPayload,
 } from "./terminal-api";
-import { parseSessionId, parseSize, parseText } from "./terminal-validation";
-import type { SidecarEvent } from "./sidecar-protocol";
+import {
+  parseSessionId,
+  parseSize,
+  parseTerminalKind,
+  parseText,
+} from "./terminal-validation";
 
 /** Recorte do SidecarClient usado pelo terminal, para permitir teste com dublê. */
 export interface TerminalBackend {
-  spawnTerminal(cols: number, rows: number): Promise<number>;
+  spawnTerminal(cols: number, rows: number, spec: ProcessSpec): Promise<number>;
   writeTerminal(sessionId: number, data: string): Promise<void>;
   resizeTerminal(sessionId: number, cols: number, rows: number): Promise<void>;
   killTerminal(sessionId: number): Promise<void>;
@@ -18,15 +25,24 @@ export interface TerminalBackend {
 
 export type SendToRenderer = (channel: string, payload: unknown) => void;
 
+/** Traduz o tipo pedido pelo renderer no programa real. Vem do processo principal. */
+export type SpecForKind = (kind: TerminalKind) => ProcessSpec;
+
 export function registerTerminalIpc(
   ipc: IpcMain,
   backend: TerminalBackend,
+  specForKind: SpecForKind,
 ): void {
   ipc.handle(
     TERMINAL_CHANNELS.spawn,
-    (_event, cols: unknown, rows: unknown) => {
+    (_event, kind: unknown, cols: unknown, rows: unknown) => {
+      const terminalKind = parseTerminalKind(kind);
       const size = parseSize(cols, rows);
-      return backend.spawnTerminal(size.cols, size.rows);
+      return backend.spawnTerminal(
+        size.cols,
+        size.rows,
+        specForKind(terminalKind),
+      );
     },
   );
 

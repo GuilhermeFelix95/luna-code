@@ -5,6 +5,7 @@ import {
   MAX_WRITE_CHARS,
   parseSessionId,
   parseSize,
+  parseTerminalKind,
   parseText,
 } from "./terminal-validation";
 
@@ -27,6 +28,20 @@ describe("parseSize", () => {
   it("rejeita tipos que não são número", () => {
     expect(() => parseSize("80", 24)).toThrow("colunas");
     expect(() => parseSize(80, undefined)).toThrow("linhas");
+  });
+});
+
+describe("parseTerminalKind", () => {
+  it("aceita os tipos conhecidos", () => {
+    expect(parseTerminalKind("shell")).toBe("shell");
+    expect(parseTerminalKind("claude")).toBe("claude");
+  });
+
+  it("rejeita tipos desconhecidos e o que não é texto", () => {
+    expect(() => parseTerminalKind("powershell.exe")).toThrow(
+      "tipo de terminal",
+    );
+    expect(() => parseTerminalKind(undefined)).toThrow("tipo de terminal");
   });
 });
 
