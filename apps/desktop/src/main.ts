@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { sidecarEnv } from "./sidecar-env";
 import { SidecarClient } from "./sidecar-client";
@@ -64,12 +63,15 @@ app
     // Perfil isolado do Claude Code: login e histórico ficam aqui, não em ~/.claude.
     const profileDir = path.join(app.getPath("userData"), "claude-profile");
     fs.mkdirSync(profileDir, { recursive: true });
+    // Pasta de trabalho do Claude: nunca a pasta pessoal (ver buildProcessSpec).
+    const workspaceDir = path.join(app.getPath("userData"), "workspace");
+    fs.mkdirSync(workspaceDir, { recursive: true });
 
     sidecar = startSidecar();
     terminals = registerTerminalIpc(ipcMain, sidecar, (kind) =>
       buildProcessSpec(kind, {
         claudeProfileDir: profileDir,
-        homeDir: os.homedir(),
+        workspaceDir,
       }),
     );
     forwardTerminalEvents(sidecar, sendToRenderer);

@@ -3,7 +3,7 @@ import { buildProcessSpec } from "./terminal-spec";
 
 const paths = {
   claudeProfileDir: "C:\\Users\\guilh\\AppData\\Roaming\\luna-code\\claude",
-  homeDir: "C:\\Users\\guilh",
+  workspaceDir: "C:\\Users\\guilh\\AppData\\Roaming\\luna-code\\workspace",
 };
 
 describe("buildProcessSpec", () => {
@@ -11,10 +11,10 @@ describe("buildProcessSpec", () => {
     expect(buildProcessSpec("shell", paths)).toEqual({});
   });
 
-  it("claude roda o CLI com CLAUDE_CONFIG_DIR apontando para o perfil", () => {
+  it("claude roda o CLI com CLAUDE_CONFIG_DIR e na pasta de trabalho do app", () => {
     expect(buildProcessSpec("claude", paths)).toEqual({
       program: "claude",
-      cwd: paths.homeDir,
+      cwd: paths.workspaceDir,
       env: { CLAUDE_CONFIG_DIR: paths.claudeProfileDir },
     });
   });

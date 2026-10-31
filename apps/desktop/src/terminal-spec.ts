@@ -7,8 +7,11 @@ import type { TerminalKind } from "./terminal-api";
 export interface TerminalSpecPaths {
   /** Pasta do perfil do Claude Code. Vira `CLAUDE_CONFIG_DIR` na sessão. */
   claudeProfileDir: string;
-  /** Pasta onde a sessão começa. */
-  homeDir: string;
+  /**
+   * Pasta onde o Claude roda. Não pode ser a pasta pessoal: o Claude não grava a
+   * confiança da pasta do usuário, então o diálogo voltaria em toda sessão.
+   */
+  workspaceDir: string;
 }
 
 export function buildProcessSpec(
@@ -21,7 +24,7 @@ export function buildProcessSpec(
     case "claude":
       return {
         program: "claude",
-        cwd: paths.homeDir,
+        cwd: paths.workspaceDir,
         env: { CLAUDE_CONFIG_DIR: paths.claudeProfileDir },
       };
   }
