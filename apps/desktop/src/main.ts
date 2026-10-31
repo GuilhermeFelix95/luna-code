@@ -4,6 +4,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   type OpenDialogOptions,
 } from "electron";
 import { spawn } from "node:child_process";
@@ -153,6 +154,8 @@ app
       },
       sendToRenderer,
     );
+    // Remove o menu padrão do Electron para deixar a janela limpa.
+    Menu.setApplicationMenu(null);
     createWindow();
   })
   .catch((error: unknown) => {
