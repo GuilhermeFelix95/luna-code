@@ -8,18 +8,46 @@
   <body>
     <div id="layout">
       <nav id="sidebar" aria-label="Navegação">
-        <button type="button" id="new-chat" class="sidebar-action">
-          Nova conversa
-        </button>
-        <ul id="chat-list"></ul>
+        <div class="sidebar-actions">
+          <button type="button" id="new-chat" class="sidebar-action">
+            Nova conversa
+          </button>
+          <button type="button" id="add-project" class="sidebar-action">
+            Adicionar projeto
+          </button>
+        </div>
+        <div id="chat-list"></div>
         <button type="button" id="new-shell" class="sidebar-action">
           Novo terminal
         </button>
         <ul id="session-list"></ul>
       </nav>
-      <main id="chat"></main>
+      <main id="welcome">
+        <h1>Luna Code</h1>
+        <p>
+          Adicione uma pasta como projeto para começar. Cada conversa roda
+          dentro do projeto dela.
+        </p>
+        <button type="button" id="welcome-add-project" class="primary">
+          Adicionar projeto
+        </button>
+      </main>
+      <main id="chat" hidden></main>
       <main id="terminal" hidden></main>
     </div>
+    <dialog id="confirm-dialog">
+      <form method="dialog">
+        <p id="confirm-message"></p>
+        <div class="dialog-actions">
+          <button type="submit" value="cancel" id="confirm-cancel">
+            Cancelar
+          </button>
+          <button type="submit" value="ok" id="confirm-action" class="danger">
+            Confirmar
+          </button>
+        </div>
+      </form>
+    </dialog>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

@@ -29,6 +29,8 @@ export interface TurnInput {
   model?: string;
   /** Ausente usa o padrão do modelo. */
   effort?: EffortLevel;
+  /** Planejar: sobrepõe o modo escolhido. */
+  planning?: boolean;
   /** Sessão anterior do Claude, para continuar a mesma conversa. */
   sessionId?: string;
   /** Pasta de trabalho do app (fora da pasta pessoal, como no terminal). */
@@ -39,6 +41,18 @@ export interface TurnInput {
   canUseTool: CanUseTool;
   abortController: AbortController;
 }
+
+/**
+ * Planejar: o SDK só explora e propõe; edições e comandos não rodam. Qualquer pedido de
+ * ferramenta que mesmo assim chegar é negado, sem perguntar.
+ */
+const PLANNING_OPTIONS: Partial<Options> = {
+  permissionMode: "plan",
+  canUseTool: async () => ({
+    behavior: "deny",
+    message: "Planejamento: nada é executado nesta conversa.",
+  }),
+};
 
 /** Opções do SDK que cada modo acrescenta às opções comuns. */
 const MODE_OPTIONS: Record<
@@ -84,7 +98,9 @@ export function buildOptions(
     // Só entram quando definidos: o SDK usa o padrão do modelo se não receber nada.
     ...(input.model === undefined ? {} : { model: input.model }),
     ...(input.effort === undefined ? {} : { effort: input.effort }),
-    ...MODE_OPTIONS[input.mode](input.canUseTool),
+    ...(input.planning
+      ? PLANNING_OPTIONS
+      : MODE_OPTIONS[input.mode](input.canUseTool)),
   };
 }
 

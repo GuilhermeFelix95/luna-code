@@ -218,6 +218,31 @@ describe("toRunnerEvents", () => {
   });
 });
 
+describe("buildOptions com planejamento", () => {
+  it("planejar usa o modo plan mesmo com acesso total escolhido", () => {
+    const options = buildOptions(turnInput({ mode: "full", planning: true }));
+
+    expect(options.permissionMode).toBe("plan");
+    expect(options).not.toHaveProperty("allowDangerouslySkipPermissions");
+  });
+
+  it("a ferramenta pedida durante o planejamento é negada sem perguntar", async () => {
+    const options = buildOptions(turnInput({ mode: "ask", planning: true }));
+
+    await expect(
+      options.canUseTool?.(
+        "Write",
+        {},
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toEqual({
+      behavior: "deny",
+      message: "Planejamento: nada é executado nesta conversa.",
+    });
+    expect(canUseTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("buildOptions com modelo e esforço", () => {
   it("não envia modelo nem esforço quando o usuário deixou o padrão", () => {
     const options = buildOptions(turnInput());

@@ -4,6 +4,7 @@ import {
   type ChatBridge,
   type ChatEventPayload,
 } from "./chat-api";
+import { STATE_CHANNELS, type StateBridge } from "./state-api";
 import {
   TERMINAL_CHANNELS,
   type TerminalBridge,
@@ -47,9 +48,24 @@ const chat: ChatBridge = {
   approve: (requestId, allowed) =>
     ipcRenderer.invoke(CHAT_CHANNELS.approve, requestId, allowed),
   listModels: () => ipcRenderer.invoke(CHAT_CHANNELS.models),
+  open: (conversationId) =>
+    ipcRenderer.invoke(CHAT_CHANNELS.open, conversationId),
   onEvent: (listener) =>
     subscribe<ChatEventPayload>(CHAT_CHANNELS.event, listener),
 };
 
+const state: StateBridge = {
+  snapshot: () => ipcRenderer.invoke(STATE_CHANNELS.get),
+  pickProject: () => ipcRenderer.invoke(STATE_CHANNELS.pickProject),
+  addProject: (folder) => ipcRenderer.invoke(STATE_CHANNELS.addProject, folder),
+  removeProject: (projectId) =>
+    ipcRenderer.invoke(STATE_CHANNELS.removeProject, projectId),
+  createConversation: (projectId) =>
+    ipcRenderer.invoke(STATE_CHANNELS.createConversation, projectId),
+  deleteConversation: (conversationId) =>
+    ipcRenderer.invoke(STATE_CHANNELS.deleteConversation, conversationId),
+};
+
 contextBridge.exposeInMainWorld("terminal", terminal);
 contextBridge.exposeInMainWorld("chat", chat);
+contextBridge.exposeInMainWorld("state", state);

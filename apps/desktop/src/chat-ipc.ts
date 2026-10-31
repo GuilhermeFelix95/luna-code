@@ -11,6 +11,7 @@ import {
   type ChatEventPayload,
   type ChatModel,
   type ChatSettings,
+  type HistoryMessage,
   type RunnerEvent,
 } from "./chat-api";
 import { parseText } from "./terminal-validation";
@@ -20,6 +21,7 @@ export const MAX_MODEL_LENGTH = 100;
 export const MAX_REQUEST_ID_LENGTH = 64;
 
 export interface TurnRequest {
+  conversationId: string;
   prompt: string;
   settings: ChatSettings;
   /** Sessão anterior da conversa, para o Claude continuar o mesmo histórico. */
@@ -34,7 +36,20 @@ export type StartTurn = (request: TurnRequest) => AsyncIterable<RunnerEvent>;
 
 export type ListModels = () => Promise<ChatModel[]>;
 
+export type LoadHistory = (conversationId: string) => Promise<HistoryMessage[]>;
+
 export type SendToRenderer = (channel: string, payload: unknown) => void;
+
+/** Parte do armazenamento de conversas que o chat usa: sessão e configurações de cada envio. */
+export interface ChatBook {
+  sessionOf(conversationId: string): string | undefined;
+  recordSession(conversationId: string, sessionId: string): void;
+  recordTurn(
+    conversationId: string,
+    settings: ChatSettings,
+    prompt: string,
+  ): void;
+}
 
 interface PendingApproval {
   conversationId: string;
@@ -43,12 +58,12 @@ interface PendingApproval {
 
 export function registerChatIpc(
   ipc: IpcMain,
+  book: ChatBook,
   startTurn: StartTurn,
   listModels: ListModels,
+  loadHistory: LoadHistory,
   sendToRenderer: SendToRenderer,
 ): void {
-  // Sessão do Claude de cada conversa, para os próximos turnos continuarem nela.
-  const sessions = new Map<string, string>();
   // Turnos em andamento. Uma conversa tem no máximo um turno por vez.
   const running = new Map<string, AbortController>();
   // Aprovações esperando resposta do usuário, por id do pedido.
@@ -95,15 +110,16 @@ export function registerChatIpc(
     let finished = false;
     try {
       const turn = startTurn({
+        conversationId,
         prompt,
         settings,
-        sessionId: sessions.get(conversationId),
+        sessionId: book.sessionOf(conversationId),
         abortController: controller,
         canUseTool: askApproval(conversationId),
       });
       for await (const event of turn) {
         if (event.type === "session") {
-          sessions.set(conversationId, event.sessionId);
+          book.recordSession(conversationId, event.sessionId);
         }
         if (event.type === "turn-end") {
           finished = true;
@@ -142,6 +158,7 @@ export function registerChatIpc(
         throw new Error("ainda há uma resposta em andamento nesta conversa");
       }
 
+      book.recordTurn(id, parsedSettings, prompt);
       const controller = new AbortController();
       running.set(id, controller);
       // O turno roda em segundo plano; os eventos chegam pelo canal de eventos.
@@ -170,6 +187,10 @@ export function registerChatIpc(
   );
 
   ipc.handle(CHAT_CHANNELS.models, () => listModels());
+
+  ipc.handle(CHAT_CHANNELS.open, (_event, conversationId: unknown) =>
+    loadHistory(parseConversationId(conversationId)),
+  );
 }
 
 function parseConversationId(value: unknown): string {
@@ -211,12 +232,18 @@ function parseSettings(value: unknown): ChatSettings {
   if (typeof value !== "object" || value === null) {
     throw new Error("configuração do envio deve ser um objeto");
   }
-  const { mode, model, effort } = value as Record<string, unknown>;
+  const { mode, model, effort, planning } = value as Record<string, unknown>;
   if (!isChatMode(mode)) {
     throw new Error(`modo de permissão desconhecido: ${String(mode)}`);
   }
 
   const settings: ChatSettings = { mode };
+  if (planning !== undefined) {
+    if (typeof planning !== "boolean") {
+      throw new Error("planejar deve ser verdadeiro ou falso");
+    }
+    settings.planning = planning;
+  }
   if (model !== undefined) {
     if (
       typeof model !== "string" ||
