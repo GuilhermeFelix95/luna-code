@@ -1,30 +1,34 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 import type { TerminalKind } from "../src/terminal-api";
-import { killLiveSessions, openSession } from "./session";
+import { killLiveSessions } from "./session";
+import { Workspace } from "./workspace";
 
-function bindNewSessionButton(
-  buttonId: string,
-  kind: TerminalKind,
-  container: HTMLElement,
-): void {
-  const button = document.getElementById(buttonId);
-  if (!button) {
-    throw new Error(`botão #${buttonId} não encontrado na janela`);
+function requireElement<T extends HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!element) {
+    throw new Error(`elemento #${id} não encontrado na janela`);
   }
-  button.addEventListener("click", () => {
-    void openSession(container, kind, window.terminal);
+  return element as T;
+}
+
+const workspace = new Workspace(
+  {
+    host: requireElement("terminal"),
+    list: requireElement<HTMLUListElement>("session-list"),
+  },
+  window.terminal,
+);
+
+function bindNewSessionButton(buttonId: string, kind: TerminalKind): void {
+  requireElement(buttonId).addEventListener("click", () => {
+    void workspace.open(kind);
   });
 }
 
-const container = document.getElementById("terminal");
-if (!container) {
-  throw new Error("elemento #terminal não encontrado na janela");
-}
-
-bindNewSessionButton("new-shell", "shell", container);
-bindNewSessionButton("new-claude", "claude", container);
+bindNewSessionButton("new-shell", "shell");
+bindNewSessionButton("new-claude", "claude");
 window.addEventListener("beforeunload", () => {
   killLiveSessions(window.terminal);
 });
-void openSession(container, "shell", window.terminal);
+void workspace.open("shell");
