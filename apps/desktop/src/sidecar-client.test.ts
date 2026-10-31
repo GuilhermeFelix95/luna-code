@@ -3,6 +3,12 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { SidecarClient } from "./sidecar-client";
 
+interface WrittenRequest {
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
 class FakeSidecar extends EventEmitter {
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
@@ -10,12 +16,11 @@ class FakeSidecar extends EventEmitter {
     return true;
   }
 
-  // Lê a requisição escrita no stdin e devolve o id enviado.
-  readRequestId(): Promise<number> {
+  // Lê a próxima requisição escrita no stdin.
+  readRequest(): Promise<WrittenRequest> {
     return new Promise((resolve) => {
       this.stdin.once("data", (chunk: Buffer) => {
-        const request = JSON.parse(chunk.toString()) as { id: number };
-        resolve(request.id);
+        resolve(JSON.parse(chunk.toString()) as WrittenRequest);
       });
     });
   }
@@ -25,28 +30,28 @@ class FakeSidecar extends EventEmitter {
   }
 }
 
-describe("SidecarClient", () => {
-  it("ping resolve com o resultado da resposta de mesmo id", async () => {
+describe("SidecarClient.ping", () => {
+  it("resolve com o resultado da resposta de mesmo id", async () => {
     const fake = new FakeSidecar();
     const client = new SidecarClient(fake);
 
-    const idPromise = fake.readRequestId();
+    const requestPromise = fake.readRequest();
     const result = client.ping();
-    fake.reply(
-      JSON.stringify({ id: await idPromise, result: "pong", error: null }),
-    );
+    const request = await requestPromise;
+    fake.reply(JSON.stringify({ id: request.id, result: "pong", error: null }));
 
     await expect(result).resolves.toBe("pong");
   });
 
-  it("ping rejeita quando o sidecar responde com erro", async () => {
+  it("rejeita quando o sidecar responde com erro", async () => {
     const fake = new FakeSidecar();
     const client = new SidecarClient(fake);
 
-    const idPromise = fake.readRequestId();
+    const requestPromise = fake.readRequest();
     const result = client.ping();
+    const request = await requestPromise;
     fake.reply(
-      JSON.stringify({ id: await idPromise, result: null, error: "falhou" }),
+      JSON.stringify({ id: request.id, result: null, error: "falhou" }),
     );
 
     await expect(result).rejects.toThrow("falhou");
@@ -70,5 +75,114 @@ describe("SidecarClient", () => {
     fake.reply("linha inválida");
 
     await expect(result).rejects.toThrow();
+  });
+});
+
+describe("SidecarClient de terminal", () => {
+  it("spawnTerminal envia cols e rows e resolve com o sessionId", async () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+
+    const requestPromise = fake.readRequest();
+    const sessionId = client.spawnTerminal(80, 24);
+    const request = await requestPromise;
+    expect(request).toMatchObject({
+      method: "pty.spawn",
+      params: { cols: 80, rows: 24 },
+    });
+    fake.reply(
+      JSON.stringify({
+        id: request.id,
+        result: { sessionId: 7 },
+        error: null,
+      }),
+    );
+
+    await expect(sessionId).resolves.toBe(7);
+  });
+
+  it("spawnTerminal rejeita resultado sem sessionId numérico", async () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+
+    const requestPromise = fake.readRequest();
+    const sessionId = client.spawnTerminal(80, 24);
+    const request = await requestPromise;
+    fake.reply(JSON.stringify({ id: request.id, result: {}, error: null }));
+
+    await expect(sessionId).rejects.toThrow("resultado de pty.spawn inválido");
+  });
+
+  it("writeTerminal envia o texto como base64", async () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+
+    const requestPromise = fake.readRequest();
+    const write = client.writeTerminal(7, "echo oi\r");
+    const request = await requestPromise;
+    expect(request).toMatchObject({
+      method: "pty.write",
+      params: {
+        sessionId: 7,
+        data: Buffer.from("echo oi\r", "utf8").toString("base64"),
+      },
+    });
+    fake.reply(JSON.stringify({ id: request.id, result: null, error: null }));
+
+    await expect(write).resolves.toBeUndefined();
+  });
+
+  it("resizeTerminal e killTerminal enviam os parâmetros corretos", async () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+
+    const resizeRequest = fake.readRequest();
+    const resize = client.resizeTerminal(7, 100, 30);
+    const resizeWritten = await resizeRequest;
+    expect(resizeWritten).toMatchObject({
+      method: "pty.resize",
+      params: { sessionId: 7, cols: 100, rows: 30 },
+    });
+    fake.reply(
+      JSON.stringify({ id: resizeWritten.id, result: null, error: null }),
+    );
+    await resize;
+
+    const killRequest = fake.readRequest();
+    const kill = client.killTerminal(7);
+    const killWritten = await killRequest;
+    expect(killWritten).toMatchObject({
+      method: "pty.kill",
+      params: { sessionId: 7 },
+    });
+    fake.reply(
+      JSON.stringify({ id: killWritten.id, result: null, error: null }),
+    );
+    await kill;
+  });
+
+  it("entrega eventos pty.output aos ouvintes sem resolver nenhuma requisição", () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+    const received: unknown[] = [];
+    client.onEvent((event) => received.push(event));
+
+    fake.reply('{"event":"pty.output","sessionId":7,"data":"b2k="}');
+
+    expect(received).toEqual([
+      { event: "pty.output", sessionId: 7, data: "b2k=" },
+    ]);
+  });
+
+  it("onEvent devolve função que cancela a assinatura", () => {
+    const fake = new FakeSidecar();
+    const client = new SidecarClient(fake);
+    const received: unknown[] = [];
+    const unsubscribe = client.onEvent((event) => received.push(event));
+
+    unsubscribe();
+    fake.reply('{"event":"pty.exit","sessionId":7,"code":0}');
+
+    expect(received).toEqual([]);
   });
 });
