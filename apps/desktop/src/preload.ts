@@ -26,6 +26,7 @@ const terminal: TerminalBridge = {
     ipcRenderer.invoke(TERMINAL_CHANNELS.write, sessionId, data),
   resize: (sessionId, cols, rows) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.resize, sessionId, cols, rows),
+  close: (sessionId) => ipcRenderer.invoke(TERMINAL_CHANNELS.close, sessionId),
   kill: (sessionId) => ipcRenderer.invoke(TERMINAL_CHANNELS.kill, sessionId),
   onOutput: (listener) =>
     subscribe<TerminalOutputPayload>(TERMINAL_CHANNELS.output, listener),

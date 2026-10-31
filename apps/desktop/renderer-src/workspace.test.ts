@@ -20,6 +20,7 @@ function fakeBridge(): TerminalBridge {
     spawn: vi.fn(async () => nextSessionId++),
     write: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
+    close: vi.fn(async () => undefined),
     kill: vi.fn(async () => undefined),
     onOutput: () => () => undefined,
     onExit: () => () => undefined,
@@ -89,6 +90,6 @@ describe("Workspace", () => {
 
     expect(panes(host)).toHaveLength(0);
     expect(list.querySelectorAll(".session-item")).toHaveLength(0);
-    expect(bridge.kill).toHaveBeenCalledWith(1);
+    expect(bridge.close).toHaveBeenCalledWith(1);
   });
 });

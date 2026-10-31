@@ -59,25 +59,25 @@ describe("registerTerminalIpc", () => {
     });
   });
 
-  it("spawn rejeita tipo desconhecido sem chamar o backend", () => {
+  it("spawn rejeita tipo desconhecido sem chamar o backend", async () => {
     const ipc = fakeIpc();
     const backend = fakeBackend();
     registerTerminalIpc(ipc as never, backend, () => ({}));
 
-    expect(() => ipc.call(TERMINAL_CHANNELS.spawn, "cmd.exe", 80, 24)).toThrow(
-      "tipo de terminal",
-    );
+    await expect(
+      ipc.call(TERMINAL_CHANNELS.spawn, "cmd.exe", 80, 24),
+    ).rejects.toThrow("tipo de terminal");
     expect(backend.spawnTerminal).not.toHaveBeenCalled();
   });
 
-  it("spawn rejeita tamanho inválido sem chamar o backend", () => {
+  it("spawn rejeita tamanho inválido sem chamar o backend", async () => {
     const ipc = fakeIpc();
     const backend = fakeBackend();
     registerTerminalIpc(ipc as never, backend, () => ({}));
 
-    expect(() => ipc.call(TERMINAL_CHANNELS.spawn, "shell", 0, 24)).toThrow(
-      "colunas",
-    );
+    await expect(
+      ipc.call(TERMINAL_CHANNELS.spawn, "shell", 0, 24),
+    ).rejects.toThrow("colunas");
     expect(backend.spawnTerminal).not.toHaveBeenCalled();
   });
 
@@ -104,6 +104,37 @@ describe("registerTerminalIpc", () => {
     expect(backend.resizeTerminal).toHaveBeenCalledWith(7, 100, 30);
 
     await ipc.call(TERMINAL_CHANNELS.kill, 7);
+    expect(backend.killTerminal).toHaveBeenCalledWith(7);
+  });
+
+  it("fechar sessão do Claude pede /exit e só mata o processo depois que ele sai", async () => {
+    const ipc = fakeIpc();
+    const backend = fakeBackend();
+    registerTerminalIpc(ipc as never, backend, () => ({}));
+    await ipc.call(TERMINAL_CHANNELS.spawn, "claude", 80, 24);
+
+    const closing = ipc.call(TERMINAL_CHANNELS.close, 7) as Promise<void>;
+    await vi.waitFor(() =>
+      expect(backend.writeTerminal).toHaveBeenCalledWith(7, "/exit\r"),
+    );
+    expect(backend.killTerminal).not.toHaveBeenCalled();
+
+    backend.listeners.forEach((listener) =>
+      listener({ event: "pty.exit", sessionId: 7, code: 0 }),
+    );
+    await closing;
+    expect(backend.killTerminal).toHaveBeenCalledWith(7);
+  });
+
+  it("fechar sessão de shell encerra sem enviar /exit", async () => {
+    const ipc = fakeIpc();
+    const backend = fakeBackend();
+    registerTerminalIpc(ipc as never, backend, () => ({}));
+    await ipc.call(TERMINAL_CHANNELS.spawn, "shell", 80, 24);
+
+    await ipc.call(TERMINAL_CHANNELS.close, 7);
+
+    expect(backend.writeTerminal).not.toHaveBeenCalled();
     expect(backend.killTerminal).toHaveBeenCalledWith(7);
   });
 });

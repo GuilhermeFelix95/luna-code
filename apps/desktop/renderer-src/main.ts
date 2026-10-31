@@ -1,7 +1,6 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 import type { TerminalKind } from "../src/terminal-api";
-import { killLiveSessions } from "./session";
 import { Workspace } from "./workspace";
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -28,7 +27,4 @@ function bindNewSessionButton(buttonId: string, kind: TerminalKind): void {
 
 bindNewSessionButton("new-shell", "shell");
 bindNewSessionButton("new-claude", "claude");
-window.addEventListener("beforeunload", () => {
-  killLiveSessions(window.terminal);
-});
 void workspace.open("shell");

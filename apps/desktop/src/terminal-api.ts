@@ -6,6 +6,7 @@ export const TERMINAL_CHANNELS = {
   write: "terminal:write",
   resize: "terminal:resize",
   kill: "terminal:kill",
+  close: "terminal:close",
   output: "terminal:output",
   exit: "terminal:exit",
 } as const;
@@ -33,6 +34,8 @@ export interface TerminalBridge {
   spawn(kind: TerminalKind, cols: number, rows: number): Promise<number>;
   write(sessionId: number, data: string): Promise<void>;
   resize(sessionId: number, cols: number, rows: number): Promise<void>;
+  /** Encerra a sessão dando ao Claude a chance de gravar a configuração antes. */
+  close(sessionId: number): Promise<void>;
   kill(sessionId: number): Promise<void>;
   onOutput(listener: (payload: TerminalOutputPayload) => void): () => void;
   onExit(listener: (payload: TerminalExitPayload) => void): () => void;

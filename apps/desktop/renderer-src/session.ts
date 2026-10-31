@@ -10,9 +10,6 @@ import {
 const TERMINAL_FONT = "Consolas, 'Cascadia Mono', monospace";
 const TERMINAL_FONT_SIZE = 14;
 
-// Sessões com processo ainda ativo. São encerradas ao fechar a janela.
-const liveSessions = new Set<number>();
-
 export interface Session {
   focus(): void;
   close(): void;
@@ -64,7 +61,6 @@ export async function openSession(
     session.ended = true;
     stopOutput();
     stopExit();
-    liveSessions.delete(payload.sessionId);
     terminal.writeln(`\r\n[processo encerrado com código ${payload.code}]`);
     void bridge.kill(payload.sessionId);
     onExit(payload.code);
@@ -81,7 +77,6 @@ export async function openSession(
     throw error;
   }
   session.id = id;
-  liveSessions.add(id);
   for (const data of session.pendingOutput.splice(0)) {
     terminal.write(decodeBase64(data));
   }
@@ -101,18 +96,13 @@ export async function openSession(
       stopOutput();
       stopExit();
       if (!session.ended) {
-        liveSessions.delete(id);
-        void bridge.kill(id);
+        bridge.close(id).catch((error: unknown) => {
+          console.error("Falha ao encerrar sessão:", error);
+        });
       }
       terminal.dispose();
     },
   };
-}
-
-export function killLiveSessions(bridge: TerminalBridge): void {
-  for (const id of liveSessions) {
-    void bridge.kill(id);
-  }
 }
 
 // WebGL é o caminho rápido; se não estiver disponível, o xterm usa o renderer DOM.
