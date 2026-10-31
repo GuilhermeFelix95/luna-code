@@ -21,7 +21,8 @@ Harness desktop com licença Apache-2.0, em monorepo pnpm. Casca em Electron; si
 - Lint de arquivos: `pnpm exec eslint <caminhos>`
 - Formatação: `pnpm exec prettier --check <caminhos>`
 - Tipos: `pnpm --filter @luna-code/desktop exec tsc -p tsconfig.json --noEmit`
-- Build: `pnpm --filter @luna-code/desktop run build`
+- Build (main, renderer e preload): `pnpm --filter @luna-code/desktop run build`
+- Tipos do renderer: `pnpm --filter @luna-code/desktop run typecheck`
 - Abrir a aplicação: `pnpm --filter @luna-code/desktop start`
 - Build do sidecar (obrigatório antes de `start`): `cargo build -p luna-sidecar`
 - Testes do sidecar: `cargo test -p luna-sidecar`
@@ -37,5 +38,10 @@ Harness desktop com licença Apache-2.0, em monorepo pnpm. Casca em Electron; si
 - O ConPTY não fecha a saída quando o processo termina. Por isso `pty.exit` sai da thread de espera, com uma janela de 500 ms para a saída pendente.
 - O portable-pty 0.9.0 devolve erro no `kill` do Windows mesmo quando o `TerminateProcess` funciona (retorno invertido). O sidecar registra aviso no log e não falha a requisição.
 - Sessões encerradas ficam no mapa até `pty.kill`. O cliente deve chamar `pty.kill` depois de receber `pty.exit`.
+- Preload em modo sandbox só consegue `require` do módulo `electron`. Por isso `src/preload.ts` é empacotado num arquivo único (`vite.preload.mts`). Sem isso, a ponte `window.terminal` fica vazia sem erro aparente.
+- O Electron carrega a página por `file://`. Script `type="module"` e `crossorigin` falham nesse protocolo. O `vite.config.mts` gera script clássico com `defer` e CSS como arquivo.
+- O CSP `default-src 'self'` bloqueia `<style>` criado por JS. Por isso o CSS sai como arquivo, não embutido.
+- `vite.config.mts` tem `root: "renderer-src"`, e o Vitest herda essa raiz. Os testes usam `vitest.config.mts`.
+- O xterm.js responde sozinho à consulta de cursor `ESC[6n`, sem código extra no renderer (verificado no PowerShell real).
 - O Electron procura o sidecar em `target/debug` (`apps/desktop/src/sidecar-path.ts`). Sem `cargo build` antes, o app inicia mas o ping falha.
 - Só atualizar a versão do Electron em PR própria, com versão estável de pelo menos duas semanas.
