@@ -10,17 +10,31 @@
       <nav id="sidebar" aria-label="Navegação">
         <div class="sidebar-actions">
           <button type="button" id="new-chat" class="sidebar-action">
-            Nova conversa
+            <span aria-hidden="true">＋</span> Nova conversa
           </button>
           <button type="button" id="add-project" class="sidebar-action">
-            Adicionar projeto
+            <span aria-hidden="true">📁</span> Adicionar projeto
           </button>
         </div>
-        <div id="chat-list"></div>
-        <button type="button" id="new-shell" class="sidebar-action">
-          Novo terminal
-        </button>
-        <ul id="session-list"></ul>
+        <section class="sidebar-projects">
+          <h2 class="sidebar-section-title">Projetos</h2>
+          <div id="chat-list"></div>
+        </section>
+        <section class="sidebar-terminals">
+          <div class="sidebar-section-header">
+            <h2 class="sidebar-section-title">Terminais</h2>
+            <button
+              type="button"
+              id="new-shell"
+              class="sidebar-icon-action"
+              aria-label="Novo terminal"
+              title="Novo terminal"
+            >
+              <span aria-hidden="true">＋</span>
+            </button>
+          </div>
+          <ul id="session-list"></ul>
+        </section>
       </nav>
       <main id="welcome">
         <h1>Luna Code</h1>

@@ -165,6 +165,41 @@ describe("ChatView: barra lateral e tela inicial", () => {
     expect(elements.newChat.title).toBe("Adicione um projeto");
   });
 
+  it("a seta do projeto muda ao recolher e reabrir", async () => {
+    const { view, elements } = setup({ projects: [PROJECT] });
+    await view.load();
+
+    const arrowOf = () =>
+      elements.list.querySelector(".project-arrow")!.textContent;
+    expect(arrowOf()).toBe("▾");
+
+    elements.list.querySelector<HTMLButtonElement>(".project-toggle")!.click();
+    expect(arrowOf()).toBe("▸");
+
+    elements.list.querySelector<HTMLButtonElement>(".project-toggle")!.click();
+    expect(arrowOf()).toBe("▾");
+  });
+
+  it("os botões de ação do projeto e da conversa têm aria-label", async () => {
+    const { view, elements } = setup({
+      projects: [PROJECT],
+      conversations: [record({ title: "Revisar o parser" })],
+    });
+    await view.load();
+
+    const labels = [".project-add", ".project-remove", ".chat-delete"].map(
+      (selector) => {
+        const button = elements.list.querySelector(selector);
+        return button?.getAttribute("aria-label");
+      },
+    );
+    expect(labels).toEqual([
+      "Nova conversa em meu-app",
+      "Remover meu-app da lista",
+      "Excluir Revisar o parser da lista",
+    ]);
+  });
+
   it("conversas aparecem dentro do seu projeto", async () => {
     const { view, elements } = setup({
       projects: [PROJECT],
