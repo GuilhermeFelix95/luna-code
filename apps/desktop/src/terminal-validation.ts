@@ -1,5 +1,7 @@
 // Validação dos argumentos que chegam do renderer. Nunca confiar na janela.
 
+import { TERMINAL_KINDS, type TerminalKind } from "./terminal-api";
+
 export const MAX_COLS = 1000;
 export const MAX_ROWS = 500;
 export const MAX_WRITE_CHARS = 64 * 1024;
@@ -14,6 +16,13 @@ export function parseSize(cols: unknown, rows: unknown): TerminalSize {
     cols: parseInteger(cols, MAX_COLS, "colunas"),
     rows: parseInteger(rows, MAX_ROWS, "linhas"),
   };
+}
+
+export function parseTerminalKind(kind: unknown): TerminalKind {
+  if (!TERMINAL_KINDS.some((known) => known === kind)) {
+    throw new Error(`tipo de terminal desconhecido: ${String(kind)}`);
+  }
+  return kind as TerminalKind;
 }
 
 export function parseSessionId(sessionId: unknown): number {

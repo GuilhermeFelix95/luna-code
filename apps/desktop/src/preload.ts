@@ -20,8 +20,8 @@ function subscribe<T>(
 }
 
 const terminal: TerminalBridge = {
-  spawn: (cols, rows) =>
-    ipcRenderer.invoke(TERMINAL_CHANNELS.spawn, cols, rows),
+  spawn: (kind, cols, rows) =>
+    ipcRenderer.invoke(TERMINAL_CHANNELS.spawn, kind, cols, rows),
   write: (sessionId, data) =>
     ipcRenderer.invoke(TERMINAL_CHANNELS.write, sessionId, data),
   resize: (sessionId, cols, rows) =>

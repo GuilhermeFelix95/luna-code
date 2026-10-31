@@ -1,8 +1,11 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { SidecarClient } from "./sidecar-client";
 import { resolveSidecarBinary } from "./sidecar-path";
+import { buildProcessSpec } from "./terminal-spec";
 import { forwardTerminalEvents, registerTerminalIpc } from "./terminal-ipc";
 import { createMainWindowOptions } from "./window-options";
 
@@ -48,8 +51,17 @@ function startSidecar(): SidecarClient {
 app
   .whenReady()
   .then(() => {
+    // Perfil isolado do Claude Code: login e histórico ficam aqui, não em ~/.claude.
+    const profileDir = path.join(app.getPath("userData"), "claude-profile");
+    fs.mkdirSync(profileDir, { recursive: true });
+
     sidecar = startSidecar();
-    registerTerminalIpc(ipcMain, sidecar);
+    registerTerminalIpc(ipcMain, sidecar, (kind) =>
+      buildProcessSpec(kind, {
+        claudeProfileDir: profileDir,
+        homeDir: os.homedir(),
+      }),
+    );
     forwardTerminalEvents(sidecar, sendToRenderer);
     createWindow();
   })
