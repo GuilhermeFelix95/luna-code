@@ -10,7 +10,9 @@ import {
   MAX_CONVERSATION_ID_LENGTH,
   MAX_MODEL_LENGTH,
   registerChatIpc,
+  type ChatBook,
   type ListModels,
+  type LoadHistory,
   type StartTurn,
   type TurnRequest,
 } from "./chat-ipc";
@@ -37,6 +39,21 @@ function fakeIpc(): {
 }
 
 const NO_MODELS: ListModels = async () => [];
+const NO_HISTORY: LoadHistory = async () => [];
+
+/** Armazenamento da conversa em memória, com as mesmas chamadas que o ConversationStore recebe. */
+function memoryBook(): ChatBook & {
+  turns: Array<{ id: string; prompt: string }>;
+} {
+  const sessions = new Map<string, string>();
+  const turns: Array<{ id: string; prompt: string }> = [];
+  return {
+    turns,
+    sessionOf: (id) => sessions.get(id),
+    recordSession: (id, sessionId) => sessions.set(id, sessionId),
+    recordTurn: (id, _settings, prompt) => turns.push({ id, prompt }),
+  };
+}
 
 /** Turno que entrega os eventos dados e só termina quando liberado. */
 function controlledTurn(events: RunnerEvent[]): {
@@ -69,7 +86,14 @@ describe("registerChatIpc", () => {
       { type: "text-delta", text: "oi" },
       { type: "turn-end", ok: true, text: "oi" },
     ]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      sent,
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "olá", READONLY);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
@@ -85,7 +109,14 @@ describe("registerChatIpc", () => {
   it("repassa modo, modelo e esforço escolhidos ao turno", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
       mode: "ask",
@@ -117,7 +148,14 @@ describe("registerChatIpc", () => {
       seen.push(request.sessionId);
       return startTurn(request);
     };
-    registerChatIpc(ipc as never, recording, NO_MODELS, sent);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      recording,
+      NO_MODELS,
+      NO_HISTORY,
+      sent,
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira", READONLY);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
@@ -130,7 +168,14 @@ describe("registerChatIpc", () => {
   it("recusa segundo envio enquanto a conversa ainda responde", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira", READONLY);
 
@@ -143,7 +188,14 @@ describe("registerChatIpc", () => {
   it("recusa mensagem vazia sem iniciar turno", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     expect(() =>
       ipc.call(CHAT_CHANNELS.send, "conv-1", "   ", READONLY),
@@ -154,7 +206,14 @@ describe("registerChatIpc", () => {
   it("recusa conversationId inválido", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     expect(() => ipc.call(CHAT_CHANNELS.send, "", "oi", READONLY)).toThrow(
       "conversationId",
@@ -175,7 +234,14 @@ describe("registerChatIpc", () => {
   it("recusa modo de permissão desconhecido", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     expect(() =>
       ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", { mode: "root" }),
@@ -186,7 +252,14 @@ describe("registerChatIpc", () => {
   it("recusa esforço fora dos cinco níveis", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     expect(() =>
       ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
@@ -200,7 +273,14 @@ describe("registerChatIpc", () => {
   it("recusa modelo vazio ou longo demais", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
 
     expect(() =>
       ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
@@ -220,7 +300,14 @@ describe("registerChatIpc", () => {
     const ipc = fakeIpc();
     const sent = vi.fn();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      sent,
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "longa", READONLY);
     ipc.call(CHAT_CHANNELS.stop, "conv-1");
@@ -245,7 +332,14 @@ describe("registerChatIpc", () => {
     };
     const startTurn: StartTurn = () => failing;
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    registerChatIpc(ipc as never, startTurn, NO_MODELS, sent);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      sent,
+    );
 
     ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", READONLY);
 
@@ -261,7 +355,14 @@ describe("registerChatIpc", () => {
     const ipc = fakeIpc();
     const sent = vi.fn();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      sent,
+    );
     ipc.call(CHAT_CHANNELS.send, "conv-1", "crie", { mode: "ask" });
 
     const signal = new AbortController().signal;
@@ -289,7 +390,14 @@ describe("registerChatIpc", () => {
   it("resposta negada volta ao SDK com a mensagem de negação", async () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
     ipc.call(CHAT_CHANNELS.send, "conv-1", "apague", { mode: "ask" });
 
     const signal = new AbortController().signal;
@@ -307,7 +415,14 @@ describe("registerChatIpc", () => {
   it("parar a resposta nega as aprovações que ainda estão abertas", async () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
     ipc.call(CHAT_CHANNELS.send, "conv-1", "crie", { mode: "ask" });
 
     const canUseTool = turn.requests[0].canUseTool as CanUseTool;
@@ -326,8 +441,10 @@ describe("registerChatIpc", () => {
     const ipc = fakeIpc();
     registerChatIpc(
       ipc as never,
+      memoryBook(),
       controlledTurn([]).startTurn,
       NO_MODELS,
+      NO_HISTORY,
       vi.fn(),
     );
 
@@ -340,8 +457,10 @@ describe("registerChatIpc", () => {
     const ipc = fakeIpc();
     registerChatIpc(
       ipc as never,
+      memoryBook(),
       controlledTurn([]).startTurn,
       NO_MODELS,
+      NO_HISTORY,
       vi.fn(),
     );
 
@@ -361,11 +480,98 @@ describe("registerChatIpc", () => {
     ];
     registerChatIpc(
       ipc as never,
+      memoryBook(),
       controlledTurn([]).startTurn,
       async () => models,
+      NO_HISTORY,
       vi.fn(),
     );
 
     await expect(ipc.call(CHAT_CHANNELS.models)).resolves.toEqual(models);
+  });
+
+  it("grava o envio na conversa antes de começar o turno", () => {
+    const ipc = fakeIpc();
+    const book = memoryBook();
+    const turn = controlledTurn([]);
+    registerChatIpc(
+      ipc as never,
+      book,
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
+
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "planeje a tela", {
+      mode: "ask",
+      planning: true,
+    });
+
+    expect(book.turns).toEqual([{ id: "conv-1", prompt: "planeje a tela" }]);
+    turn.release();
+  });
+
+  it("repassa o planejamento ligado ao turno e aceita o desligado", () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      turn.startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
+
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+      mode: "full",
+      planning: true,
+    });
+    turn.release();
+
+    expect(turn.requests[0].settings).toEqual({
+      mode: "full",
+      planning: true,
+    });
+  });
+
+  it("planejamento precisa ser verdadeiro ou falso", () => {
+    const ipc = fakeIpc();
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      controlledTurn([]).startTurn,
+      NO_MODELS,
+      NO_HISTORY,
+      vi.fn(),
+    );
+
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+        mode: "ask",
+        planning: "sim",
+      }),
+    ).toThrow("planejar deve ser verdadeiro ou falso");
+  });
+
+  it("abrir conversa devolve o histórico carregado", async () => {
+    const ipc = fakeIpc();
+    const history = [
+      { role: "user" as const, text: "oi" },
+      { role: "assistant" as const, text: "olá" },
+    ];
+    registerChatIpc(
+      ipc as never,
+      memoryBook(),
+      controlledTurn([]).startTurn,
+      NO_MODELS,
+      async (id) => (id === "conv-1" ? history : []),
+      vi.fn(),
+    );
+
+    await expect(ipc.call(CHAT_CHANNELS.open, "conv-1")).resolves.toEqual(
+      history,
+    );
   });
 });

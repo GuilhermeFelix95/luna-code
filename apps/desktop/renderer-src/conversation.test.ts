@@ -9,7 +9,7 @@ import {
 
 describe("conversation", () => {
   it("usa a primeira mensagem como título, encurtada", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     const longText = "x".repeat(TITLE_MAX_CHARS + 10);
 
     addUserMessage(conversation, longText);
@@ -20,7 +20,7 @@ describe("conversation", () => {
   });
 
   it("junta os deltas de texto numa única mensagem do assistente", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     addUserMessage(conversation, "oi");
 
     applyEvent(conversation, { type: "text-delta", text: "Olá" });
@@ -33,7 +33,7 @@ describe("conversation", () => {
   });
 
   it("registra ferramenta e marca o resultado", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     addUserMessage(conversation, "liste");
 
     applyEvent(conversation, {
@@ -58,7 +58,7 @@ describe("conversation", () => {
   });
 
   it("marca ferramenta com erro quando o resultado vem com is_error", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     addUserMessage(conversation, "leia");
     applyEvent(conversation, {
       type: "tool-use",
@@ -80,7 +80,7 @@ describe("conversation", () => {
   });
 
   it("guarda a sessão e encerra o envio no fim do turno", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     addUserMessage(conversation, "oi");
 
     applyEvent(conversation, { type: "session", sessionId: "s-1" });
@@ -91,7 +91,7 @@ describe("conversation", () => {
   });
 
   it("falha do turno vira mensagem de erro, sem sumir", () => {
-    const conversation = newConversation("c1", { mode: "readonly" });
+    const conversation = newConversation("c1", "p1", { mode: "readonly" });
     addUserMessage(conversation, "oi");
 
     applyEvent(conversation, {
@@ -109,7 +109,7 @@ describe("conversation", () => {
 
   it("copia as configurações da conversa, sem compartilhar o objeto", () => {
     const settings = { mode: "ask" as const, model: "opus" };
-    const conversation = newConversation("c1", settings);
+    const conversation = newConversation("c1", "p1", settings);
 
     conversation.settings.model = "haiku";
 
@@ -117,7 +117,7 @@ describe("conversation", () => {
   });
 
   it("pedido de aprovação fica pendente até ser respondido", () => {
-    const conversation = newConversation("c1", { mode: "ask" });
+    const conversation = newConversation("c1", "p1", { mode: "ask" });
     addUserMessage(conversation, "crie um arquivo");
 
     applyEvent(conversation, {
@@ -139,7 +139,7 @@ describe("conversation", () => {
   });
 
   it("fim do turno nega aprovações que ainda estavam abertas", () => {
-    const conversation = newConversation("c1", { mode: "ask" });
+    const conversation = newConversation("c1", "p1", { mode: "ask" });
     addUserMessage(conversation, "crie um arquivo");
     applyEvent(conversation, {
       type: "approval-request",

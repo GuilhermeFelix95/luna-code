@@ -1,7 +1,9 @@
 // Estado de uma conversa do chat. Funções puras sobre o objeto, sem DOM, para testar em Node.
 
-import type { ChatEvent, ChatSettings } from "../src/chat-api";
+import type { ChatEvent, ChatSettings, HistoryMessage } from "../src/chat-api";
+import type { ConversationRecord } from "../src/state-api";
 
+export const DEFAULT_TITLE = "Nova conversa";
 export const TITLE_MAX_CHARS = 40;
 
 export interface ToolCall {
@@ -27,27 +29,64 @@ export type Message =
 
 export interface Conversation {
   id: string;
+  /** Projeto dono da conversa. A pasta de trabalho é a dele. */
+  projectId: string;
   title: string;
   messages: Message[];
   /** Verdadeiro entre o envio e o fim do turno. */
   busy: boolean;
-  /** Modo, modelo e esforço desta conversa. Valem para a próxima mensagem. */
+  /** Modo, modelo, esforço e planejar desta conversa. Valem para a próxima mensagem. */
   settings: ChatSettings;
-  /** Sessão do Claude, para continuar o histórico. Vem no primeiro evento do turno. */
+  /** Sessão do Claude, para continuar o histórico. Vem no primeiro evento do turno ou do disco. */
   sessionId?: string;
+  /** Falso enquanto o histórico de uma conversa salva não foi carregado. */
+  historyLoaded: boolean;
 }
 
 export function newConversation(
   id: string,
+  projectId: string,
   settings: ChatSettings,
+  title = DEFAULT_TITLE,
 ): Conversation {
   return {
     id,
-    title: "Nova conversa",
+    projectId,
+    title,
     messages: [],
     busy: false,
     settings: { ...settings },
+    historyLoaded: true,
   };
+}
+
+/** Conversa salva: o histórico só é lido quando ela é aberta. */
+export function conversationFromRecord(
+  record: ConversationRecord,
+): Conversation {
+  return {
+    ...newConversation(
+      record.id,
+      record.projectId,
+      record.settings,
+      record.title,
+    ),
+    sessionId: record.sessionId,
+    historyLoaded: record.sessionId === undefined,
+  };
+}
+
+/** Preenche a conversa com o histórico lido do Claude. Substitui o que houver na tela. */
+export function setHistory(
+  conversation: Conversation,
+  history: HistoryMessage[],
+): void {
+  conversation.messages = history.map((item): Message =>
+    item.role === "user"
+      ? { role: "user", text: item.text }
+      : { role: "assistant", text: item.text, tools: [] },
+  );
+  conversation.historyLoaded = true;
 }
 
 export function addUserMessage(conversation: Conversation, text: string): void {

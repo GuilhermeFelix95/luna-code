@@ -1,6 +1,8 @@
-// Tela de conversa com o Claude. O Claude roda por baixo; o usuário vê só mensagens e cartões.
-// Todo texto vai por textContent, nunca por innerHTML: a saída do modelo não é HTML confiável.
+// Tela de conversa com o Claude e barra lateral de projetos. O Claude roda por baixo; o usuário vê
+// mensagens, cartões e a lista de projetos. Todo texto vai por textContent, nunca por innerHTML:
+// a saída do modelo não é HTML confiável.
 
+import type { Project } from "../src/state-api";
 import {
   CHAT_MODES,
   type ChatBridge,
@@ -9,21 +11,32 @@ import {
   type ChatSettings,
   type EffortLevel,
 } from "../src/chat-api";
+import type { StateBridge } from "../src/state-api";
 import {
   addUserMessage,
   applyEvent,
-  newConversation,
+  conversationFromRecord,
   resolveApproval,
+  setHistory,
   type Conversation,
   type Message,
   type ToolCall,
 } from "./conversation";
+import { Menu, type MenuItem } from "./menu";
+
+/** Pede confirmação ao usuário. Resolve true só quando ele confirma. */
+export type Confirm = (message: string, action: string) => Promise<boolean>;
 
 export interface ChatViewElements {
-  /** Área onde a conversa e o campo de envio são desenhados. */
+  /** Área da conversa: mensagens e campo de envio. */
   host: HTMLElement;
-  /** Lista de conversas na barra lateral. */
-  list: HTMLUListElement;
+  /** Tela inicial vazia, mostrada quando nenhuma conversa está aberta. */
+  welcome: HTMLElement;
+  /** Barra lateral com os projetos e as conversas de cada um. */
+  list: HTMLElement;
+  newChat: HTMLButtonElement;
+  addProject: HTMLButtonElement;
+  welcomeAddProject: HTMLButtonElement;
 }
 
 const MODE_LABEL: Record<ChatMode, string> = {
@@ -40,28 +53,39 @@ const EFFORT_LABEL: Record<EffortLevel, string> = {
   max: "Máximo",
 };
 
-/** Valor do seletor que significa "padrão do modelo" (nada é enviado). */
+/** Valor que significa "padrão do modelo" (nada é enviado). */
 const DEFAULT_OPTION = "";
+/** Valor do menu de modo enquanto Planejar está ligado. Substitui o modo escolhido. */
+const PLANNING_OPTION = "planning";
+const PLANNING_LABEL = "Planejando";
 
 export class ChatView {
-  private readonly conversations: Conversation[] = [];
+  private projects: Project[] = [];
+  private conversations: Conversation[] = [];
   private current: Conversation | undefined;
-  private sequence = 0;
-  /** Última escolha de modo, modelo e esforço. Conversas novas começam com ela. */
+  /** Projetos recolhidos na barra lateral. */
+  private readonly collapsed = new Set<string>();
+  /** Última escolha de modo, modelo, esforço e planejar. Conversas novas começam com ela. */
   private lastSettings: ChatSettings = { mode: "readonly" };
   private models: ChatModel[] = [];
   private modelsFailed = false;
+  /** Aviso mostrado na barra lateral, por exemplo quando uma ação falha. */
+  private notice = "";
   private readonly messages: HTMLDivElement;
   private readonly input: HTMLTextAreaElement;
   private readonly sendButton: HTMLButtonElement;
-  private readonly modeSelect: HTMLSelectElement;
-  private readonly modelSelect: HTMLSelectElement;
-  private readonly effortSelect: HTMLSelectElement;
+  private readonly planButton: HTMLButtonElement;
+  private readonly modeMenu: Menu;
+  private readonly modelMenu: Menu;
+  private readonly effortMenu: Menu;
 
   constructor(
     private readonly elements: ChatViewElements,
     private readonly bridge: ChatBridge,
-    private readonly onActivate: () => void,
+    private readonly state: StateBridge,
+    private readonly confirm: Confirm,
+    /** Mostra a área da conversa e esconde o terminal. */
+    private readonly onShowChat: () => void,
   ) {
     this.messages = document.createElement("div");
     this.messages.className = "chat-messages";
@@ -75,13 +99,32 @@ export class ChatView {
     this.sendButton.type = "submit";
     this.sendButton.className = "chat-send";
 
-    this.modeSelect = createSelect("Modo de permissão");
-    this.modelSelect = createSelect("Modelo");
-    this.effortSelect = createSelect("Esforço");
-    this.fillModeOptions();
+    this.planButton = document.createElement("button");
+    this.planButton.type = "button";
+    this.planButton.className = "plan-switch";
+    this.planButton.setAttribute("role", "switch");
+    this.planButton.setAttribute("aria-checked", "false");
+    this.planButton.textContent = "Planejar";
+
+    this.modeMenu = new Menu("Modo de permissão", (value) => {
+      this.updateSettings({ mode: value as ChatMode });
+    });
+    this.modelMenu = new Menu("Modelo", (value) => {
+      this.changeModel(value === DEFAULT_OPTION ? undefined : value);
+    });
+    this.effortMenu = new Menu("Esforço", (value) => {
+      this.updateSettings({
+        effort: value === DEFAULT_OPTION ? undefined : (value as EffortLevel),
+      });
+    });
 
     this.elements.host.append(this.messages, this.buildComposer());
-    this.bindSelectors();
+
+    this.planButton.addEventListener("click", () => {
+      this.updateSettings({
+        planning: this.activeSettings().planning !== true,
+      });
+    });
 
     bridge.onEvent(({ conversationId, event }) => {
       const conversation = this.conversations.find(
@@ -91,38 +134,176 @@ export class ChatView {
         return;
       }
       applyEvent(conversation, event);
-      this.renderList();
       if (conversation === this.current) {
         this.renderMessages();
-        this.renderFooter();
+        // O fim do turno destrava os controles; durante o texto eles ficam como estão.
+        if (event.type === "turn-end") {
+          this.renderFooter();
+        }
       }
     });
 
+    this.elements.newChat.addEventListener("click", () => {
+      void this.newConversation();
+    });
+    this.elements.addProject.addEventListener("click", () => {
+      void this.addProject();
+    });
+    this.elements.welcomeAddProject.addEventListener("click", () => {
+      void this.addProject();
+    });
+
     this.loadModels();
-    this.renderList();
-    this.renderMessages();
     this.renderFooter();
   }
 
-  /** Abre uma conversa vazia com a última escolha de modo, modelo e esforço. */
-  newConversation(): void {
-    this.sequence += 1;
-    const conversation = newConversation(
-      `conversa-${this.sequence}`,
-      this.lastSettings,
-    );
-    this.conversations.push(conversation);
-    this.select(conversation);
+  /** Carrega projetos e conversas salvos e abre a tela inicial. Chamado uma vez, ao abrir o app. */
+  async load(): Promise<void> {
+    const snapshot = await this.state.snapshot();
+    this.projects = snapshot.projects;
+    this.conversations = snapshot.conversations.map(conversationFromRecord);
+    this.showWelcome();
+  }
+
+  /**
+   * Cria uma conversa no projeto dado. Sem projeto informado, usa o da conversa aberta ou o primeiro.
+   * Devolve undefined quando não há projeto ou a criação falha.
+   */
+  async newConversation(
+    projectId: string | undefined = this.current?.projectId ??
+      this.projects[0]?.id,
+  ): Promise<Conversation | undefined> {
+    if (projectId === undefined) {
+      return undefined;
+    }
+    try {
+      const record = await this.state.createConversation(projectId);
+      const conversation = conversationFromRecord(record);
+      this.conversations.push(conversation);
+      this.notice = "";
+      this.select(conversation);
+      return conversation;
+    } catch (error: unknown) {
+      this.fail("Não foi possível criar a conversa", error);
+      return undefined;
+    }
+  }
+
+  /** Abre o seletor de pasta, pede confirmação e adiciona o projeto. */
+  async addProject(): Promise<void> {
+    try {
+      const picked = await this.state.pickProject();
+      if (!picked) {
+        return;
+      }
+      const name = basename(picked.path);
+      const warning = picked.personal
+        ? " Esta é a sua pasta pessoal: o Claude pode ler e alterar tudo nela."
+        : "";
+      const ok = await this.confirm(
+        `Adicionar ${name} como projeto?${warning} O Claude vai carregar o CLAUDE.md e a pasta .claude/ dela. Hooks definidos nessa pasta podem executar comandos.`,
+        "Adicionar",
+      );
+      if (!ok) {
+        return;
+      }
+      const project = await this.state.addProject(picked.path);
+      this.projects = [...this.projects, project];
+      this.notice = "";
+      this.renderList();
+    } catch (error: unknown) {
+      this.fail("Não foi possível adicionar o projeto", error);
+    }
   }
 
   private select(conversation: Conversation): void {
     this.current = conversation;
-    this.onActivate();
+    this.onShowChat();
+    this.elements.welcome.hidden = true;
     this.elements.host.hidden = false;
     this.renderList();
     this.renderMessages();
     this.renderFooter();
     this.input.focus();
+    if (!conversation.historyLoaded) {
+      void this.loadHistory(conversation);
+    }
+  }
+
+  /** Lê o histórico de uma conversa salva. Se falhar, a conversa tenta de novo na próxima abertura. */
+  private async loadHistory(conversation: Conversation): Promise<void> {
+    try {
+      setHistory(conversation, await this.bridge.open(conversation.id));
+    } catch (error: unknown) {
+      console.error("Falha ao abrir a conversa salva:", error);
+      conversation.messages.push({ role: "error", text: String(error) });
+    }
+    if (conversation === this.current) {
+      this.renderMessages();
+    }
+  }
+
+  private showWelcome(): void {
+    this.current = undefined;
+    this.elements.host.hidden = true;
+    this.elements.welcome.hidden = false;
+    this.onShowChat();
+    this.renderList();
+    this.renderFooter();
+  }
+
+  private async deleteConversation(conversation: Conversation): Promise<void> {
+    const ok = await this.confirm(
+      `Excluir "${conversation.title}" da lista do Luna? O histórico continua no disco do Claude e não é apagado.`,
+      "Excluir",
+    );
+    if (!ok) {
+      return;
+    }
+    try {
+      if (conversation.busy) {
+        await this.bridge.stop(conversation.id);
+      }
+      await this.state.deleteConversation(conversation.id);
+    } catch (error: unknown) {
+      this.fail("Não foi possível excluir a conversa", error);
+      return;
+    }
+    this.conversations = this.conversations.filter(
+      (candidate) => candidate !== conversation,
+    );
+    if (this.current === conversation) {
+      this.showWelcome();
+    } else {
+      this.renderList();
+    }
+  }
+
+  private async removeProject(project: Project): Promise<void> {
+    const ok = await this.confirm(
+      `Remover ${project.name} da lista do Luna? A pasta e o histórico do Claude não são apagados. As conversas dele saem da lista.`,
+      "Remover",
+    );
+    if (!ok) {
+      return;
+    }
+    try {
+      await this.state.removeProject(project.id);
+    } catch (error: unknown) {
+      this.fail("Não foi possível remover o projeto", error);
+      return;
+    }
+    this.projects = this.projects.filter(
+      (candidate) => candidate.id !== project.id,
+    );
+    this.conversations = this.conversations.filter(
+      (conversation) => conversation.projectId !== project.id,
+    );
+    if (this.current && this.current.projectId === project.id) {
+      this.showWelcome();
+    } else {
+      this.renderList();
+    }
   }
 
   private buildComposer(): HTMLFormElement {
@@ -133,51 +314,35 @@ export class ChatView {
     footer.className = "chat-composer-footer";
     const selectors = document.createElement("div");
     selectors.className = "chat-selectors";
-    selectors.append(this.modeSelect, this.modelSelect, this.effortSelect);
+    selectors.append(
+      this.planButton,
+      this.modeMenu.element,
+      this.modelMenu.element,
+      this.effortMenu.element,
+    );
     footer.append(selectors, this.sendButton);
 
     form.append(this.input, footer);
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      this.send();
+      void this.send();
     });
     this.input.addEventListener("keydown", (event) => {
       // Enter só envia; parar a resposta fica no botão, para não cancelar sem querer.
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         if (!this.current?.busy) {
-          this.send();
+          void this.send();
         }
       }
     });
     return form;
   }
 
-  private bindSelectors(): void {
-    this.modeSelect.addEventListener("change", () => {
-      this.updateSettings({ mode: this.modeSelect.value as ChatMode });
-    });
-    this.modelSelect.addEventListener("change", () => {
-      const model =
-        this.modelSelect.value === DEFAULT_OPTION
-          ? undefined
-          : this.modelSelect.value;
-      // Um nível de esforço que o novo modelo não aceita volta ao padrão.
-      const effort = this.levelsFor(model).includes(
-        this.lastSettings.effort as EffortLevel,
-      )
-        ? this.lastSettings.effort
-        : undefined;
-      this.updateSettings({ model, effort });
-    });
-    this.effortSelect.addEventListener("change", () => {
-      const effort =
-        this.effortSelect.value === DEFAULT_OPTION
-          ? undefined
-          : (this.effortSelect.value as EffortLevel);
-      this.updateSettings({ effort });
-    });
+  /** Configuração em uso: a da conversa aberta ou a última escolha. */
+  private activeSettings(): ChatSettings {
+    return this.current?.settings ?? this.lastSettings;
   }
 
   /** Grava a escolha na conversa atual e como padrão para as próximas. */
@@ -192,8 +357,18 @@ export class ChatView {
     this.renderFooter();
   }
 
+  /** Um nível de esforço que o novo modelo não aceita volta ao padrão. */
+  private changeModel(model: string | undefined): void {
+    const effort = this.levelsFor(model).includes(
+      this.activeSettings().effort as EffortLevel,
+    )
+      ? this.activeSettings().effort
+      : undefined;
+    this.updateSettings({ model, effort });
+  }
+
   /** Envia a mensagem, ou para a resposta em andamento quando o botão está em "Parar". */
-  private send(): void {
+  private async send(): Promise<void> {
     if (this.current?.busy) {
       void this.bridge.stop(this.current.id);
       return;
@@ -202,11 +377,8 @@ export class ChatView {
     if (text.length === 0) {
       return;
     }
-    if (!this.current) {
-      this.newConversation();
-    }
-    const conversation = this.current;
-    if (!conversation) {
+    const conversation = this.current ?? (await this.newConversation());
+    if (!conversation || conversation.busy) {
       return;
     }
 
@@ -250,34 +422,13 @@ export class ChatView {
     this.bridge.listModels().then(
       (models) => {
         this.models = models;
-        this.fillModelOptions();
         this.renderFooter();
       },
       (error: unknown) => {
         console.error("Falha ao listar modelos:", error);
         this.modelsFailed = true;
-        this.fillModelOptions();
         this.renderFooter();
       },
-    );
-  }
-
-  private fillModeOptions(): void {
-    this.modeSelect.replaceChildren(
-      ...CHAT_MODES.map((mode) => option(mode, MODE_LABEL[mode])),
-    );
-  }
-
-  private fillModelOptions(): void {
-    if (this.modelsFailed) {
-      this.modelSelect.replaceChildren(
-        option(DEFAULT_OPTION, "Modelos indisponíveis"),
-      );
-      return;
-    }
-    this.modelSelect.replaceChildren(
-      option(DEFAULT_OPTION, "Padrão do modelo"),
-      ...this.models.map((model) => option(model.value, model.displayName)),
     );
   }
 
@@ -291,41 +442,155 @@ export class ChatView {
   }
 
   private renderFooter(): void {
-    const conversation = this.current;
-    const settings = conversation?.settings ?? this.lastSettings;
-    const locked = !conversation || conversation.busy;
+    const settings = this.activeSettings();
+    const busy = this.current?.busy === true;
+    const planning = settings.planning === true;
 
-    this.modeSelect.value = settings.mode;
-    this.modelSelect.value = settings.model ?? DEFAULT_OPTION;
-    this.effortSelect.replaceChildren(
-      option(DEFAULT_OPTION, "Padrão do modelo"),
-      ...this.levelsFor(settings.model).map((level) =>
-        option(level, EFFORT_LABEL[level]),
-      ),
+    this.planButton.setAttribute("aria-checked", String(planning));
+    this.planButton.classList.toggle("is-on", planning);
+    this.planButton.disabled = busy;
+
+    // Com Planejar ligado, o modo escolhido fica guardado e o menu mostra só "Planejando".
+    this.modeMenu.setOptions(
+      planning
+        ? [{ value: PLANNING_OPTION, label: PLANNING_LABEL }]
+        : CHAT_MODES.map((mode) => ({ value: mode, label: MODE_LABEL[mode] })),
+      planning ? PLANNING_OPTION : settings.mode,
     );
-    this.effortSelect.value = settings.effort ?? DEFAULT_OPTION;
+    this.modeMenu.setDisabled(busy || planning);
 
-    this.modeSelect.disabled = locked;
-    this.modelSelect.disabled = locked || this.modelsFailed;
-    this.effortSelect.disabled = locked;
+    this.modelMenu.setOptions(
+      this.modelItems(),
+      settings.model ?? DEFAULT_OPTION,
+    );
+    this.modelMenu.setDisabled(busy || this.modelsFailed);
+
+    this.effortMenu.setOptions(
+      [
+        { value: DEFAULT_OPTION, label: "Padrão do modelo" },
+        ...this.levelsFor(settings.model).map((level) => ({
+          value: level,
+          label: EFFORT_LABEL[level],
+        })),
+      ],
+      settings.effort ?? DEFAULT_OPTION,
+    );
+    this.effortMenu.setDisabled(busy);
+  }
+
+  private modelItems(): MenuItem[] {
+    if (this.modelsFailed) {
+      return [{ value: DEFAULT_OPTION, label: "Modelos indisponíveis" }];
+    }
+    return [
+      { value: DEFAULT_OPTION, label: "Padrão do modelo" },
+      ...this.models.map((model) => ({
+        value: model.value,
+        label: model.displayName,
+      })),
+    ];
   }
 
   private renderList(): void {
-    this.elements.list.replaceChildren(
-      ...this.conversations.map((conversation) => {
-        const item = document.createElement("li");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "chat-item";
-        button.textContent = conversation.title;
-        if (conversation === this.current) {
-          button.setAttribute("aria-current", "true");
-        }
-        button.addEventListener("click", () => this.select(conversation));
-        item.append(button);
-        return item;
-      }),
+    const children: HTMLElement[] = [];
+    if (this.notice) {
+      const notice = document.createElement("p");
+      notice.className = "sidebar-notice";
+      notice.setAttribute("role", "alert");
+      notice.textContent = this.notice;
+      children.push(notice);
+    }
+    for (const project of this.projects) {
+      children.push(this.renderProject(project));
+    }
+    this.elements.list.replaceChildren(...children);
+
+    // Sem projeto não há onde criar conversa: o botão fica desabilitado e explica o motivo.
+    const hasProject = this.projects.length > 0;
+    this.elements.newChat.disabled = !hasProject;
+    this.elements.newChat.title = hasProject ? "" : "Adicione um projeto";
+  }
+
+  private renderProject(project: Project): HTMLElement {
+    const group = document.createElement("section");
+    group.className = "project-group";
+
+    const expanded = !this.collapsed.has(project.id);
+    const header = document.createElement("div");
+    header.className = "project-header";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "project-toggle";
+    toggle.textContent = project.name;
+    toggle.title = project.path;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.addEventListener("click", () => {
+      if (expanded) {
+        this.collapsed.add(project.id);
+      } else {
+        this.collapsed.delete(project.id);
+      }
+      this.renderList();
+    });
+
+    const add = iconButton(
+      `Nova conversa em ${project.name}`,
+      "+",
+      "project-add",
     );
+    add.addEventListener("click", () => {
+      void this.newConversation(project.id);
+    });
+    const remove = iconButton(
+      `Remover ${project.name} da lista`,
+      "×",
+      "project-remove",
+    );
+    remove.addEventListener("click", () => {
+      void this.removeProject(project);
+    });
+
+    header.append(toggle, add, remove);
+    group.append(header);
+
+    if (expanded) {
+      const list = document.createElement("ul");
+      list.className = "chat-list";
+      for (const conversation of this.conversations) {
+        if (conversation.projectId === project.id) {
+          list.append(this.renderConversation(conversation));
+        }
+      }
+      group.append(list);
+    }
+    return group;
+  }
+
+  private renderConversation(conversation: Conversation): HTMLElement {
+    const item = document.createElement("li");
+    item.className = "chat-row";
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "chat-item";
+    open.textContent = conversation.title;
+    if (conversation === this.current) {
+      open.setAttribute("aria-current", "true");
+    }
+    open.addEventListener("click", () => this.select(conversation));
+
+    const remove = iconButton(
+      `Excluir ${conversation.title} da lista`,
+      "×",
+      "chat-delete",
+    );
+    remove.addEventListener("click", () => {
+      void this.deleteConversation(conversation);
+    });
+
+    item.append(open, remove);
+    return item;
   }
 
   private renderMessages(): void {
@@ -344,6 +609,12 @@ export class ChatView {
       this.messages.append(thinking());
     }
     this.messages.scrollTop = this.messages.scrollHeight;
+  }
+
+  private fail(message: string, error: unknown): void {
+    console.error(`${message}:`, error);
+    this.notice = `${message}.`;
+    this.renderList();
   }
 }
 
@@ -443,17 +714,26 @@ function thinking(): HTMLElement {
   return element;
 }
 
-function createSelect(label: string): HTMLSelectElement {
-  const select = document.createElement("select");
-  select.setAttribute("aria-label", label);
-  return select;
+function iconButton(
+  label: string,
+  symbol: string,
+  className: string,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.setAttribute("aria-label", label);
+  button.textContent = symbol;
+  return button;
 }
 
-function option(value: string, label: string): HTMLOptionElement {
-  const element = document.createElement("option");
-  element.value = value;
-  element.textContent = label;
-  return element;
+function basename(folder: string): string {
+  return (
+    folder
+      .split(/[\\/]/)
+      .filter((part) => part.length > 0)
+      .at(-1) ?? folder
+  );
 }
 
 /** Remove chaves com valor indefinido, para o objeto atravessar o IPC limpo. */
@@ -464,6 +744,9 @@ function withoutUnset(settings: ChatSettings): ChatSettings {
   }
   if (settings.effort !== undefined) {
     result.effort = settings.effort;
+  }
+  if (settings.planning !== undefined) {
+    result.planning = settings.planning;
   }
   return result;
 }

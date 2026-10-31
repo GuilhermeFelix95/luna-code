@@ -6,6 +6,7 @@ export const CHAT_CHANNELS = {
   stop: "chat:stop",
   approve: "chat:approve",
   models: "chat:models",
+  open: "chat:open",
   event: "chat:event",
 } as const;
 
@@ -29,6 +30,14 @@ export interface ChatSettings {
   mode: ChatMode;
   model?: string;
   effort?: EffortLevel;
+  /** Planejar: a conversa roda só em modo de planejamento, sem editar nem executar. */
+  planning?: boolean;
+}
+
+/** Mensagem de uma conversa salva, reconstruída do histórico do Claude ao reabrir. */
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  text: string;
 }
 
 /** Modelo disponível na conta, com os níveis de esforço que ele aceita. */
@@ -71,5 +80,6 @@ export interface ChatBridge {
   stop(conversationId: string): Promise<void>;
   approve(requestId: string, allowed: boolean): Promise<void>;
   listModels(): Promise<ChatModel[]>;
+  open(conversationId: string): Promise<HistoryMessage[]>;
   onEvent(listener: (payload: ChatEventPayload) => void): () => void;
 }
