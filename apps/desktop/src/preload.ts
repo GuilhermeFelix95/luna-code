@@ -40,10 +40,13 @@ const terminal: TerminalBridge = {
 };
 
 const chat: ChatBridge = {
-  send: (conversationId, text) =>
-    ipcRenderer.invoke(CHAT_CHANNELS.send, conversationId, text),
+  send: (conversationId, text, settings) =>
+    ipcRenderer.invoke(CHAT_CHANNELS.send, conversationId, text, settings),
   stop: (conversationId) =>
     ipcRenderer.invoke(CHAT_CHANNELS.stop, conversationId),
+  approve: (requestId, allowed) =>
+    ipcRenderer.invoke(CHAT_CHANNELS.approve, requestId, allowed),
+  listModels: () => ipcRenderer.invoke(CHAT_CHANNELS.models),
   onEvent: (listener) =>
     subscribe<ChatEventPayload>(CHAT_CHANNELS.event, listener),
 };

@@ -1,11 +1,19 @@
 // Tela de conversa com o Claude. O Claude roda por baixo; o usuário vê só mensagens e cartões.
 // Todo texto vai por textContent, nunca por innerHTML: a saída do modelo não é HTML confiável.
 
-import type { ChatBridge } from "../src/chat-api";
+import {
+  CHAT_MODES,
+  type ChatBridge,
+  type ChatMode,
+  type ChatModel,
+  type ChatSettings,
+  type EffortLevel,
+} from "../src/chat-api";
 import {
   addUserMessage,
   applyEvent,
   newConversation,
+  resolveApproval,
   type Conversation,
   type Message,
   type ToolCall,
@@ -18,13 +26,37 @@ export interface ChatViewElements {
   list: HTMLUListElement;
 }
 
+const MODE_LABEL: Record<ChatMode, string> = {
+  readonly: "Somente leitura",
+  ask: "Acesso parcial",
+  full: "Acesso total",
+};
+
+const EFFORT_LABEL: Record<EffortLevel, string> = {
+  low: "Baixo",
+  medium: "Médio",
+  high: "Alto",
+  xhigh: "Muito alto",
+  max: "Máximo",
+};
+
+/** Valor do seletor que significa "padrão do modelo" (nada é enviado). */
+const DEFAULT_OPTION = "";
+
 export class ChatView {
   private readonly conversations: Conversation[] = [];
   private current: Conversation | undefined;
   private sequence = 0;
+  /** Última escolha de modo, modelo e esforço. Conversas novas começam com ela. */
+  private lastSettings: ChatSettings = { mode: "readonly" };
+  private models: ChatModel[] = [];
+  private modelsFailed = false;
   private readonly messages: HTMLDivElement;
   private readonly input: HTMLTextAreaElement;
   private readonly sendButton: HTMLButtonElement;
+  private readonly modeSelect: HTMLSelectElement;
+  private readonly modelSelect: HTMLSelectElement;
+  private readonly effortSelect: HTMLSelectElement;
 
   constructor(
     private readonly elements: ChatViewElements,
@@ -42,9 +74,14 @@ export class ChatView {
     this.sendButton = document.createElement("button");
     this.sendButton.type = "submit";
     this.sendButton.className = "chat-send";
-    this.sendButton.textContent = "Enviar";
+
+    this.modeSelect = createSelect("Modo de permissão");
+    this.modelSelect = createSelect("Modelo");
+    this.effortSelect = createSelect("Esforço");
+    this.fillModeOptions();
 
     this.elements.host.append(this.messages, this.buildComposer());
+    this.bindSelectors();
 
     bridge.onEvent(({ conversationId, event }) => {
       const conversation = this.conversations.find(
@@ -57,17 +94,23 @@ export class ChatView {
       this.renderList();
       if (conversation === this.current) {
         this.renderMessages();
+        this.renderFooter();
       }
     });
 
+    this.loadModels();
     this.renderList();
     this.renderMessages();
+    this.renderFooter();
   }
 
-  /** Abre uma conversa vazia e a deixa ativa. */
+  /** Abre uma conversa vazia com a última escolha de modo, modelo e esforço. */
   newConversation(): void {
     this.sequence += 1;
-    const conversation = newConversation(`conversa-${this.sequence}`);
+    const conversation = newConversation(
+      `conversa-${this.sequence}`,
+      this.lastSettings,
+    );
     this.conversations.push(conversation);
     this.select(conversation);
   }
@@ -78,6 +121,7 @@ export class ChatView {
     this.elements.host.hidden = false;
     this.renderList();
     this.renderMessages();
+    this.renderFooter();
     this.input.focus();
   }
 
@@ -87,9 +131,10 @@ export class ChatView {
 
     const footer = document.createElement("div");
     footer.className = "chat-composer-footer";
-    const mode = document.createElement("span");
-    mode.textContent = "Somente leitura";
-    footer.append(mode, this.sendButton);
+    const selectors = document.createElement("div");
+    selectors.className = "chat-selectors";
+    selectors.append(this.modeSelect, this.modelSelect, this.effortSelect);
+    footer.append(selectors, this.sendButton);
 
     form.append(this.input, footer);
 
@@ -107,6 +152,44 @@ export class ChatView {
       }
     });
     return form;
+  }
+
+  private bindSelectors(): void {
+    this.modeSelect.addEventListener("change", () => {
+      this.updateSettings({ mode: this.modeSelect.value as ChatMode });
+    });
+    this.modelSelect.addEventListener("change", () => {
+      const model =
+        this.modelSelect.value === DEFAULT_OPTION
+          ? undefined
+          : this.modelSelect.value;
+      // Um nível de esforço que o novo modelo não aceita volta ao padrão.
+      const effort = this.levelsFor(model).includes(
+        this.lastSettings.effort as EffortLevel,
+      )
+        ? this.lastSettings.effort
+        : undefined;
+      this.updateSettings({ model, effort });
+    });
+    this.effortSelect.addEventListener("change", () => {
+      const effort =
+        this.effortSelect.value === DEFAULT_OPTION
+          ? undefined
+          : (this.effortSelect.value as EffortLevel);
+      this.updateSettings({ effort });
+    });
+  }
+
+  /** Grava a escolha na conversa atual e como padrão para as próximas. */
+  private updateSettings(change: Partial<ChatSettings>): void {
+    this.lastSettings = withoutUnset({ ...this.lastSettings, ...change });
+    if (this.current) {
+      this.current.settings = withoutUnset({
+        ...this.current.settings,
+        ...change,
+      });
+    }
+    this.renderFooter();
   }
 
   /** Envia a mensagem, ou para a resposta em andamento quando o botão está em "Parar". */
@@ -131,14 +214,100 @@ export class ChatView {
     addUserMessage(conversation, text);
     this.renderList();
     this.renderMessages();
+    this.renderFooter();
 
-    this.bridge.send(conversation.id, text).catch((error: unknown) => {
-      // Falha ao enviar (por exemplo, mensagem vazia recusada pelo processo principal).
-      console.error("Falha ao enviar mensagem:", error);
-      conversation.busy = false;
-      conversation.messages.push({ role: "error", text: String(error) });
-      this.renderMessages();
-    });
+    this.bridge
+      .send(conversation.id, text, withoutUnset(conversation.settings))
+      .catch((error: unknown) => {
+        // Falha ao enviar (por exemplo, configuração recusada pelo processo principal).
+        console.error("Falha ao enviar mensagem:", error);
+        conversation.busy = false;
+        conversation.messages.push({ role: "error", text: String(error) });
+        this.renderMessages();
+        this.renderFooter();
+      });
+  }
+
+  private answer(
+    conversation: Conversation,
+    requestId: string,
+    allowed: boolean,
+  ): void {
+    this.bridge.approve(requestId, allowed).then(
+      () => {
+        resolveApproval(conversation, requestId, allowed);
+        this.renderMessages();
+      },
+      (error: unknown) => {
+        console.error("Falha ao responder aprovação:", error);
+        conversation.messages.push({ role: "error", text: String(error) });
+        this.renderMessages();
+      },
+    );
+  }
+
+  private loadModels(): void {
+    this.bridge.listModels().then(
+      (models) => {
+        this.models = models;
+        this.fillModelOptions();
+        this.renderFooter();
+      },
+      (error: unknown) => {
+        console.error("Falha ao listar modelos:", error);
+        this.modelsFailed = true;
+        this.fillModelOptions();
+        this.renderFooter();
+      },
+    );
+  }
+
+  private fillModeOptions(): void {
+    this.modeSelect.replaceChildren(
+      ...CHAT_MODES.map((mode) => option(mode, MODE_LABEL[mode])),
+    );
+  }
+
+  private fillModelOptions(): void {
+    if (this.modelsFailed) {
+      this.modelSelect.replaceChildren(
+        option(DEFAULT_OPTION, "Modelos indisponíveis"),
+      );
+      return;
+    }
+    this.modelSelect.replaceChildren(
+      option(DEFAULT_OPTION, "Padrão do modelo"),
+      ...this.models.map((model) => option(model.value, model.displayName)),
+    );
+  }
+
+  /** Níveis de esforço aceitos pelo modelo. Sem modelo escolhido, vale o padrão da conta. */
+  private levelsFor(model: string | undefined): EffortLevel[] {
+    const value = model ?? "default";
+    return (
+      this.models.find((candidate) => candidate.value === value)
+        ?.supportedEffortLevels ?? []
+    );
+  }
+
+  private renderFooter(): void {
+    const conversation = this.current;
+    const settings = conversation?.settings ?? this.lastSettings;
+    const locked = !conversation || conversation.busy;
+
+    this.modeSelect.value = settings.mode;
+    this.modelSelect.value = settings.model ?? DEFAULT_OPTION;
+    this.effortSelect.replaceChildren(
+      option(DEFAULT_OPTION, "Padrão do modelo"),
+      ...this.levelsFor(settings.model).map((level) =>
+        option(level, EFFORT_LABEL[level]),
+      ),
+    );
+    this.effortSelect.value = settings.effort ?? DEFAULT_OPTION;
+
+    this.modeSelect.disabled = locked;
+    this.modelSelect.disabled = locked || this.modelsFailed;
+    this.effortSelect.disabled = locked;
   }
 
   private renderList(): void {
@@ -164,7 +333,11 @@ export class ChatView {
     this.sendButton.textContent = conversation?.busy ? "Parar" : "Enviar";
     this.messages.replaceChildren(
       ...(conversation?.messages ?? []).map((message) =>
-        renderMessage(message),
+        renderMessage(message, (requestId, allowed) => {
+          if (conversation) {
+            this.answer(conversation, requestId, allowed);
+          }
+        }),
       ),
     );
     if (conversation?.busy) {
@@ -174,9 +347,16 @@ export class ChatView {
   }
 }
 
-function renderMessage(message: Message): HTMLElement {
+function renderMessage(
+  message: Message,
+  onAnswer: (requestId: string, allowed: boolean) => void,
+): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = `message message-${message.role}`;
+
+  if (message.role === "approval") {
+    return renderApproval(message, onAnswer);
+  }
 
   const text = document.createElement("p");
   text.textContent = message.text;
@@ -187,6 +367,54 @@ function renderMessage(message: Message): HTMLElement {
   }
   return wrapper;
 }
+
+function renderApproval(
+  message: Extract<Message, { role: "approval" }>,
+  onAnswer: (requestId: string, allowed: boolean) => void,
+): HTMLElement {
+  const card = document.createElement("div");
+  card.className = `approval approval-${message.status}`;
+
+  const title = document.createElement("p");
+  title.textContent = `O Claude quer usar ${message.toolName}`;
+
+  const input = document.createElement("pre");
+  input.textContent = JSON.stringify(message.input, null, 2);
+
+  card.append(title, input);
+
+  if (message.status === "pending") {
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const allow = document.createElement("button");
+    allow.type = "button";
+    allow.className = "approval-allow";
+    allow.textContent = "Permitir";
+    allow.addEventListener("click", () => onAnswer(message.requestId, true));
+    const deny = document.createElement("button");
+    deny.type = "button";
+    deny.className = "approval-deny";
+    deny.textContent = "Negar";
+    deny.addEventListener("click", () => onAnswer(message.requestId, false));
+    actions.append(deny, allow);
+    card.append(actions);
+  } else {
+    const status = document.createElement("p");
+    status.className = "approval-result";
+    status.textContent = APPROVAL_LABEL[message.status];
+    card.append(status);
+  }
+  return card;
+}
+
+const APPROVAL_LABEL: Record<
+  Extract<Message, { role: "approval" }>["status"],
+  string
+> = {
+  pending: "Aguardando resposta",
+  allowed: "Permitido",
+  denied: "Negado",
+};
 
 function renderTool(tool: ToolCall): HTMLElement {
   const details = document.createElement("details");
@@ -213,4 +441,29 @@ function thinking(): HTMLElement {
   element.className = "thinking";
   element.textContent = "Pensando…";
   return element;
+}
+
+function createSelect(label: string): HTMLSelectElement {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", label);
+  return select;
+}
+
+function option(value: string, label: string): HTMLOptionElement {
+  const element = document.createElement("option");
+  element.value = value;
+  element.textContent = label;
+  return element;
+}
+
+/** Remove chaves com valor indefinido, para o objeto atravessar o IPC limpo. */
+function withoutUnset(settings: ChatSettings): ChatSettings {
+  const result: ChatSettings = { mode: settings.mode };
+  if (settings.model !== undefined) {
+    result.model = settings.model;
+  }
+  if (settings.effort !== undefined) {
+    result.effort = settings.effort;
+  }
+  return result;
 }

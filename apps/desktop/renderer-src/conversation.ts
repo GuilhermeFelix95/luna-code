@@ -1,6 +1,6 @@
 // Estado de uma conversa do chat. Funções puras sobre o objeto, sem DOM, para testar em Node.
 
-import type { RunnerEvent } from "../src/chat-api";
+import type { ChatEvent, ChatSettings } from "../src/chat-api";
 
 export const TITLE_MAX_CHARS = 40;
 
@@ -11,10 +11,19 @@ export interface ToolCall {
   status: "running" | "done" | "error";
 }
 
+export type ApprovalStatus = "pending" | "allowed" | "denied";
+
 export type Message =
   | { role: "user"; text: string }
   | { role: "assistant"; text: string; tools: ToolCall[] }
-  | { role: "error"; text: string };
+  | { role: "error"; text: string }
+  | {
+      role: "approval";
+      requestId: string;
+      toolName: string;
+      input: unknown;
+      status: ApprovalStatus;
+    };
 
 export interface Conversation {
   id: string;
@@ -22,12 +31,23 @@ export interface Conversation {
   messages: Message[];
   /** Verdadeiro entre o envio e o fim do turno. */
   busy: boolean;
+  /** Modo, modelo e esforço desta conversa. Valem para a próxima mensagem. */
+  settings: ChatSettings;
   /** Sessão do Claude, para continuar o histórico. Vem no primeiro evento do turno. */
   sessionId?: string;
 }
 
-export function newConversation(id: string): Conversation {
-  return { id, title: "Nova conversa", messages: [], busy: false };
+export function newConversation(
+  id: string,
+  settings: ChatSettings,
+): Conversation {
+  return {
+    id,
+    title: "Nova conversa",
+    messages: [],
+    busy: false,
+    settings: { ...settings },
+  };
 }
 
 export function addUserMessage(conversation: Conversation, text: string): void {
@@ -38,10 +58,7 @@ export function addUserMessage(conversation: Conversation, text: string): void {
   conversation.busy = true;
 }
 
-export function applyEvent(
-  conversation: Conversation,
-  event: RunnerEvent,
-): void {
+export function applyEvent(conversation: Conversation, event: ChatEvent): void {
   switch (event.type) {
     case "session":
       conversation.sessionId = event.sessionId;
@@ -68,12 +85,41 @@ export function applyEvent(
       return;
     }
 
+    case "approval-request":
+      conversation.messages.push({
+        role: "approval",
+        requestId: event.requestId,
+        toolName: event.toolName,
+        input: event.input,
+        status: "pending",
+      });
+      return;
+
     case "turn-end":
       conversation.busy = false;
+      // Aprovações ainda abertas quando o turno termina foram negadas (parar a resposta).
+      for (const message of conversation.messages) {
+        if (message.role === "approval" && message.status === "pending") {
+          message.status = "denied";
+        }
+      }
       if (!event.ok) {
         conversation.messages.push({ role: "error", text: event.text });
       }
       return;
+  }
+}
+
+/** Marca a resposta do usuário a um pedido de aprovação. */
+export function resolveApproval(
+  conversation: Conversation,
+  requestId: string,
+  allowed: boolean,
+): void {
+  for (const message of conversation.messages) {
+    if (message.role === "approval" && message.requestId === requestId) {
+      message.status = allowed ? "allowed" : "denied";
+    }
   }
 }
 

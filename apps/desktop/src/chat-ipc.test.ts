@@ -1,13 +1,23 @@
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it, vi } from "vitest";
-import { CHAT_CHANNELS, type RunnerEvent } from "./chat-api";
+import {
+  CHAT_CHANNELS,
+  type ChatModel,
+  type ChatSettings,
+  type RunnerEvent,
+} from "./chat-api";
 import {
   MAX_CONVERSATION_ID_LENGTH,
+  MAX_MODEL_LENGTH,
   registerChatIpc,
+  type ListModels,
   type StartTurn,
   type TurnRequest,
 } from "./chat-ipc";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
+
+const READONLY: ChatSettings = { mode: "readonly" };
 
 function fakeIpc(): {
   handle: (channel: string, handler: Handler) => void;
@@ -25,6 +35,8 @@ function fakeIpc(): {
     },
   };
 }
+
+const NO_MODELS: ListModels = async () => [];
 
 /** Turno que entrega os eventos dados e só termina quando liberado. */
 function controlledTurn(events: RunnerEvent[]): {
@@ -57,9 +69,9 @@ describe("registerChatIpc", () => {
       { type: "text-delta", text: "oi" },
       { type: "turn-end", ok: true, text: "oi" },
     ]);
-    registerChatIpc(ipc as never, turn.startTurn, sent);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
 
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "olá");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "olá", READONLY);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
 
     expect(sent).toHaveBeenNthCalledWith(1, CHAT_CHANNELS.event, {
@@ -67,6 +79,25 @@ describe("registerChatIpc", () => {
       event: { type: "text-delta", text: "oi" },
     });
     expect(turn.requests[0].prompt).toBe("olá");
+    turn.release();
+  });
+
+  it("repassa modo, modelo e esforço escolhidos ao turno", () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+      mode: "ask",
+      model: "opus",
+      effort: "high",
+    });
+
+    expect(turn.requests[0].settings).toEqual({
+      mode: "ask",
+      model: "opus",
+      effort: "high",
+    });
     turn.release();
   });
 
@@ -86,11 +117,11 @@ describe("registerChatIpc", () => {
       seen.push(request.sessionId);
       return startTurn(request);
     };
-    registerChatIpc(ipc as never, recording, sent);
+    registerChatIpc(ipc as never, recording, NO_MODELS, sent);
 
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira", READONLY);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "segunda");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "segunda", READONLY);
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(4));
 
     expect(seen).toEqual([undefined, "sessao-1"]);
@@ -99,33 +130,33 @@ describe("registerChatIpc", () => {
   it("recusa segundo envio enquanto a conversa ainda responde", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, vi.fn());
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
 
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "primeira", READONLY);
 
-    expect(() => ipc.call(CHAT_CHANNELS.send, "conv-1", "segunda")).toThrow(
-      "em andamento",
-    );
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "segunda", READONLY),
+    ).toThrow("em andamento");
     turn.release();
   });
 
   it("recusa mensagem vazia sem iniciar turno", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, vi.fn());
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
 
-    expect(() => ipc.call(CHAT_CHANNELS.send, "conv-1", "   ")).toThrow(
-      "não pode estar vazia",
-    );
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "   ", READONLY),
+    ).toThrow("não pode estar vazia");
     expect(turn.requests).toEqual([]);
   });
 
   it("recusa conversationId inválido", () => {
     const ipc = fakeIpc();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, vi.fn());
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
 
-    expect(() => ipc.call(CHAT_CHANNELS.send, "", "oi")).toThrow(
+    expect(() => ipc.call(CHAT_CHANNELS.send, "", "oi", READONLY)).toThrow(
       "conversationId",
     );
     expect(() =>
@@ -133,20 +164,65 @@ describe("registerChatIpc", () => {
         CHAT_CHANNELS.send,
         "x".repeat(MAX_CONVERSATION_ID_LENGTH + 1),
         "oi",
+        READONLY,
       ),
     ).toThrow("conversationId");
-    expect(() => ipc.call(CHAT_CHANNELS.send, 7, "oi")).toThrow(
+    expect(() => ipc.call(CHAT_CHANNELS.send, 7, "oi", READONLY)).toThrow(
       "conversationId",
     );
+  });
+
+  it("recusa modo de permissão desconhecido", () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", { mode: "root" }),
+    ).toThrow("modo de permissão desconhecido");
+    expect(turn.requests).toEqual([]);
+  });
+
+  it("recusa esforço fora dos cinco níveis", () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+        mode: "readonly",
+        effort: "turbo",
+      }),
+    ).toThrow("nível de esforço desconhecido");
+    expect(turn.requests).toEqual([]);
+  });
+
+  it("recusa modelo vazio ou longo demais", () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+        mode: "readonly",
+        model: "",
+      }),
+    ).toThrow("modelo deve ser texto");
+    expect(() =>
+      ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", {
+        mode: "readonly",
+        model: "m".repeat(MAX_MODEL_LENGTH + 1),
+      }),
+    ).toThrow("modelo deve ser texto");
   });
 
   it("parar aborta o turno e avisa o renderer que terminou", async () => {
     const ipc = fakeIpc();
     const sent = vi.fn();
     const turn = controlledTurn([]);
-    registerChatIpc(ipc as never, turn.startTurn, sent);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
 
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "longa");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "longa", READONLY);
     ipc.call(CHAT_CHANNELS.stop, "conv-1");
     turn.release();
 
@@ -169,9 +245,9 @@ describe("registerChatIpc", () => {
     };
     const startTurn: StartTurn = () => failing;
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    registerChatIpc(ipc as never, startTurn, sent);
+    registerChatIpc(ipc as never, startTurn, NO_MODELS, sent);
 
-    ipc.call(CHAT_CHANNELS.send, "conv-1", "oi");
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "oi", READONLY);
 
     await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
     expect(sent).toHaveBeenCalledWith(CHAT_CHANNELS.event, {
@@ -179,5 +255,117 @@ describe("registerChatIpc", () => {
       event: { type: "turn-end", ok: false, text: "sem login" },
     });
     vi.restoreAllMocks();
+  });
+
+  it("pedido de ferramenta vai ao renderer e segue a resposta do usuário", async () => {
+    const ipc = fakeIpc();
+    const sent = vi.fn();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, sent);
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "crie", { mode: "ask" });
+
+    const signal = new AbortController().signal;
+    const canUseTool = turn.requests[0].canUseTool as CanUseTool;
+    const decision = canUseTool("Write", { file_path: "a.txt" }, { signal });
+
+    expect(sent).toHaveBeenCalledWith(CHAT_CHANNELS.event, {
+      conversationId: "conv-1",
+      event: {
+        type: "approval-request",
+        requestId: "aprovacao-1",
+        toolName: "Write",
+        input: { file_path: "a.txt" },
+      },
+    });
+    ipc.call(CHAT_CHANNELS.approve, "aprovacao-1", true);
+
+    await expect(decision).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: { file_path: "a.txt" },
+    });
+    turn.release();
+  });
+
+  it("resposta negada volta ao SDK com a mensagem de negação", async () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "apague", { mode: "ask" });
+
+    const signal = new AbortController().signal;
+    const canUseTool = turn.requests[0].canUseTool as CanUseTool;
+    const decision = canUseTool("Bash", { command: "rm x" }, { signal });
+    ipc.call(CHAT_CHANNELS.approve, "aprovacao-1", false);
+
+    await expect(decision).resolves.toEqual({
+      behavior: "deny",
+      message: "O usuário negou esta ação.",
+    });
+    turn.release();
+  });
+
+  it("parar a resposta nega as aprovações que ainda estão abertas", async () => {
+    const ipc = fakeIpc();
+    const turn = controlledTurn([]);
+    registerChatIpc(ipc as never, turn.startTurn, NO_MODELS, vi.fn());
+    ipc.call(CHAT_CHANNELS.send, "conv-1", "crie", { mode: "ask" });
+
+    const canUseTool = turn.requests[0].canUseTool as CanUseTool;
+    const decision = canUseTool(
+      "Write",
+      {},
+      { signal: turn.requests[0].abortController.signal },
+    );
+    ipc.call(CHAT_CHANNELS.stop, "conv-1");
+
+    await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+    turn.release();
+  });
+
+  it("aprovação já respondida ou desconhecida é recusada", () => {
+    const ipc = fakeIpc();
+    registerChatIpc(
+      ipc as never,
+      controlledTurn([]).startTurn,
+      NO_MODELS,
+      vi.fn(),
+    );
+
+    expect(() => ipc.call(CHAT_CHANNELS.approve, "aprovacao-9", true)).toThrow(
+      "desconhecida ou já respondida",
+    );
+  });
+
+  it("resposta de aprovação precisa ser verdadeira ou falsa", () => {
+    const ipc = fakeIpc();
+    registerChatIpc(
+      ipc as never,
+      controlledTurn([]).startTurn,
+      NO_MODELS,
+      vi.fn(),
+    );
+
+    expect(() => ipc.call(CHAT_CHANNELS.approve, "aprovacao-1", "sim")).toThrow(
+      "verdadeira ou falsa",
+    );
+  });
+
+  it("lista de modelos vem da função de listagem", async () => {
+    const ipc = fakeIpc();
+    const models: ChatModel[] = [
+      {
+        value: "opus",
+        displayName: "Opus 5.5",
+        supportedEffortLevels: ["low"],
+      },
+    ];
+    registerChatIpc(
+      ipc as never,
+      controlledTurn([]).startTurn,
+      async () => models,
+      vi.fn(),
+    );
+
+    await expect(ipc.call(CHAT_CHANNELS.models)).resolves.toEqual(models);
   });
 });
