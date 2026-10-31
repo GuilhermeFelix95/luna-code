@@ -35,29 +35,88 @@ body {
   min-height: 0;
 }
 
+/* Barra lateral em coluna: ações no topo, projetos no meio (rolam) e terminais no rodapé. */
 #sidebar {
   width: 260px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px;
   box-sizing: border-box;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
 }
 
+/* Ações leves, sem caixa: só ganham fundo no hover. */
 .sidebar-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
+  margin-bottom: 2px;
+  padding: 6px 8px;
+  border: 0;
   border-radius: 8px;
-  background: var(--surface);
+  background: none;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .sidebar-action:hover {
-  background: var(--border);
+  background: var(--surface);
+}
+
+.sidebar-projects {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar-terminals {
+  flex-shrink: 0;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* Título de seção: pequeno, em maiúsculas e discreto. */
+.sidebar-section-title {
+  margin: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-section-header .sidebar-section-title {
+  margin-right: 0;
+}
+
+/* Botão compacto de adicionar, ao lado do título de seção. */
+.sidebar-icon-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-icon-action:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 #session-list,
@@ -90,30 +149,46 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
+  border-radius: 8px;
+}
+
+.project-header:hover {
+  background: var(--surface);
 }
 
 .project-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 1;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 6px 8px;
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
   text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
 }
 
+.project-arrow {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Botões de ação da linha: invisíveis até o cursor, o foco ou o teclado chegarem na linha. */
 .project-add,
 .project-remove,
-.chat-delete {
+.chat-delete,
+.session-close {
   width: 24px;
   height: 24px;
   padding: 0;
@@ -124,19 +199,46 @@ body {
   font: inherit;
   line-height: 1;
   cursor: pointer;
+  opacity: 0;
+}
+
+.project-header:hover .project-add,
+.project-header:hover .project-remove,
+.project-header:focus-within .project-add,
+.project-header:focus-within .project-remove,
+.chat-row:hover .chat-delete,
+.chat-row:focus-within .chat-delete,
+.session-item:hover .session-close,
+.session-item:focus-within .session-close,
+.project-add:focus-visible,
+.project-remove:focus-visible,
+.chat-delete:focus-visible,
+.session-close:focus-visible {
+  opacity: 1;
 }
 
 .project-add:hover,
 .project-remove:hover,
-.chat-delete:hover {
+.chat-delete:hover,
+.session-close:hover {
   background: var(--border);
   color: var(--text);
+}
+
+/* Conversas ficam recuadas sob o projeto. */
+.project-group .chat-list {
+  padding-left: 16px;
 }
 
 .chat-row {
   display: flex;
   align-items: center;
   gap: 2px;
+  border-radius: 8px;
+}
+
+.chat-row:hover {
+  background: var(--surface);
 }
 
 .chat-row .chat-item {
@@ -338,6 +440,11 @@ button:disabled {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.session-item:hover {
+  background: var(--surface);
 }
 
 .session-select {

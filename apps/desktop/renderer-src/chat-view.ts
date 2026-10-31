@@ -543,7 +543,14 @@ export class ChatView {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "project-toggle";
-    toggle.textContent = project.name;
+    const arrow = document.createElement("span");
+    arrow.className = "project-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = expanded ? "▾" : "▸";
+    const name = document.createElement("span");
+    name.className = "project-name";
+    name.textContent = project.name;
+    toggle.append(arrow, name);
     toggle.title = project.path;
     toggle.setAttribute("aria-expanded", String(expanded));
     toggle.addEventListener("click", () => {
@@ -744,6 +751,7 @@ function iconButton(
   button.type = "button";
   button.className = className;
   button.setAttribute("aria-label", label);
+  button.title = label;
   button.textContent = symbol;
   return button;
 }
