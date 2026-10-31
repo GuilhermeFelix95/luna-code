@@ -4,12 +4,12 @@ import type {
   SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it, vi } from "vitest";
+import type { RunnerEvent } from "./chat-api";
 import {
   buildOptions,
   runClaudeTurn,
   toRunnerEvents,
   type QueryFn,
-  type RunnerEvent,
   type TurnInput,
 } from "./claude-runner";
 

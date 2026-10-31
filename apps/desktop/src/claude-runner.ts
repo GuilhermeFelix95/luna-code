@@ -7,6 +7,7 @@ import type {
   Query,
   SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { RunnerEvent } from "./chat-api";
 import { sidecarEnv } from "./sidecar-env";
 
 /** Modos de permissão expostos ao usuário. Os nomes do SDK ficam dentro deste módulo. */
@@ -28,13 +29,6 @@ export interface TurnInput {
   canUseTool: CanUseTool;
   abortController: AbortController;
 }
-
-export type RunnerEvent =
-  | { type: "session"; sessionId: string }
-  | { type: "text-delta"; text: string }
-  | { type: "tool-use"; id: string; name: string; input: unknown }
-  | { type: "tool-result"; toolUseId: string; isError: boolean }
-  | { type: "turn-end"; ok: boolean; text: string };
 
 /** Opções do SDK que cada modo acrescenta às opções comuns. */
 const MODE_OPTIONS: Record<

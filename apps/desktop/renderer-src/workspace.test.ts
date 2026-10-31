@@ -35,7 +35,12 @@ function mountWorkspace(bridge: TerminalBridge): {
   const host = document.createElement("main");
   const list = document.createElement("ul");
   document.body.append(host, list);
-  return { workspace: new Workspace({ host, list }, bridge), list, host };
+  const onActivate = vi.fn();
+  return {
+    workspace: new Workspace({ host, list, onActivate }, bridge),
+    list,
+    host,
+  };
 }
 
 const panes = (host: HTMLElement): HTMLElement[] => [
