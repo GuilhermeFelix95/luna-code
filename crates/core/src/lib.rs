@@ -1,3 +1,7 @@
-//! Núcleo do harness: sessões, store de contexto e adaptadores por CLI.
+//! Núcleo do harness: store de conversas e adaptadores por CLI.
 //!
-//! Ainda sem implementação.
+//! Por enquanto: store SQLite. Adaptadores de CLI e handoff ainda não existem.
+
+pub mod store;
+
+pub use store::{Message, Role, Store};
