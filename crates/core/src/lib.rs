@@ -1,3 +1,9 @@
-//! Núcleo do harness: sessões, store de contexto e adaptadores por CLI.
+//! Núcleo do harness: adaptadores por CLI de agente.
 //!
-//! Ainda sem implementação.
+//! Por enquanto: adaptador do Claude Code. Sessões e handoff ainda não existem.
+
+pub mod adapter;
+pub mod claude;
+
+pub use adapter::{CliAdapter, Turn};
+pub use claude::ClaudeAdapter;
